@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.sqlite3
+*.pcap
+*.pcapng
+ngrok_gps*.log
+archive_dev/

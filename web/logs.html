@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJY Baja Run Archive</title>
+  <link rel="stylesheet" href="/djy.css">
+  <style>
+    body { height: 100vh; overflow: hidden; }
+    .logs-layout { height: calc(100vh - 64px); display: grid; grid-template-columns: 290px minmax(0, 1fr); }
+    .session-panel { min-height: 0; display: flex; flex-direction: column; background: #020202; border-right: 1px solid var(--line-strong); }
+    .panel-title { height: 43px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 11px Consolas, monospace; }
+    #session-count { color: #d0d0d0; }
+    #sessions { overflow-y: auto; }
+    .session-row { width: 100%; display: block; padding: 13px 14px; border: 0; border-bottom: 1px solid #191919; border-left: 3px solid transparent; background: #020202; color: var(--text); text-align: left; cursor: pointer; }
+    .session-row:hover { background: #090909; }
+    .session-row.active { background: #0c0c0c; border-left-color: var(--green); }
+    .session-name { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 650; white-space: nowrap; }
+    .session-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font: 10px Consolas, monospace; }
+    .live { color: var(--red); }
+    .detail { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(190px, 35vh) minmax(180px, 1fr); gap: 10px; padding: 14px; }
+    .run-head { min-width: 0; display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 2px 2px 8px; }
+    .run-head h2 { overflow: hidden; margin: 0; font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-head p { margin: 5px 0 0; color: var(--muted); font: 11px Consolas, monospace; }
+    .chart-panel { min-height: 0; position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); background: #020202; }
+    .chart-head { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px Consolas, monospace; }
+    .trace-controls, .series-toggles, .zoom-controls { display: flex; align-items: center; gap: 5px; }
+    .trace-controls { flex-wrap: wrap; justify-content: flex-end; }
+    .series-toggle { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line); background: #050505; cursor: pointer; user-select: none; }
+    .series-toggle input { width: 12px; height: 12px; margin: 0; accent-color: currentColor; }
+    .series-toggle:has(input:not(:checked)) { color: #555; }
+    .zoom-button { width: 29px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 0; background: #050505; color: #ddd; font: 17px Consolas, monospace; cursor: pointer; }
+    .zoom-button:hover { border-color: var(--line-strong); background: #0b0b0b; }
+    #zoom-level { width: 42px; color: #aaa; text-align: center; }
+    #trace { min-height: 0; width: 100%; height: 100%; display: block; flex: 1; cursor: crosshair; touch-action: none; }
+    #trace.dragging { cursor: grabbing; }
+    .chart-tooltip { position: absolute; z-index: 3; min-width: 164px; padding: 8px 10px; border: 1px solid #555; background: rgba(0,0,0,.94); color: #ddd; font: 10px/1.55 Consolas, monospace; pointer-events: none; }
+    .chart-tooltip[hidden] { display: none; }
+    .tooltip-time { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: #aaa; }
+    .tooltip-row { display: flex; justify-content: space-between; gap: 18px; }
+    .empty { padding: 24px 14px; color: var(--muted); font: 12px Consolas, monospace; }
+    @media (max-width: 800px) {
+      body { height: auto; overflow: auto; }
+      .logs-layout { height: auto; display: block; }
+      .session-panel { max-height: 290px; border-right: 0; border-bottom: 1px solid var(--line-strong); }
+      .detail { grid-template-rows: auto auto 260px 420px; padding: 10px; }
+      .run-head { align-items: flex-start; flex-direction: column; }
+      .chart-head { align-items: flex-start; flex-direction: column; }
+      .trace-controls { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>대자연 DJY · RUN ARCHIVE</h1><small>BAJA TELEMETRY / SESSION REVIEW</small></div>
+    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/dashboard">PIT WALL</a></nav>
+  </header>
+  <main class="logs-layout">
+    <aside class="session-panel">
+      <div class="panel-title"><span>RUN SESSIONS</span><span id="session-count">0</span></div>
+      <div id="sessions"><div class="empty">NO RECORDED SESSION</div></div>
+    </aside>
+    <section class="detail">
+      <div class="run-head">
+        <div><h2 id="run-name">세션을 선택하세요</h2><p id="run-meta">왼쪽 목록에서 주행 기록 선택</p></div>
+        <div id="load-state" class="mono muted">STANDBY</div>
+      </div>
+      <div class="metric-strip">
+        <div class="metric"><div class="metric-label">Samples</div><div class="metric-value" id="samples">--</div></div>
+        <div class="metric"><div class="metric-label">Duration</div><div class="metric-value" id="duration">--<span class="metric-unit">s</span></div></div>
+        <div class="metric"><div class="metric-label">Max RPM</div><div class="metric-value signal-green" id="maxrpm">--</div></div>
+        <div class="metric"><div class="metric-label">Max Speed</div><div class="metric-value signal-blue" id="maxspeed">--<span class="metric-unit">km/h</span></div></div>
+        <div class="metric"><div class="metric-label">Avg Fuel Add</div><div class="metric-value signal-red" id="avgfuel">--</div></div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-head">
+          <span>RUN TRACE</span>
+          <div class="trace-controls">
+            <div class="series-toggles">
+              <label class="series-toggle signal-green"><input id="toggle-rpm" type="checkbox" checked><span>RPM</span></label>
+              <label class="series-toggle signal-blue"><input id="toggle-speed" type="checkbox" checked><span>SPEED</span></label>
+              <label class="series-toggle signal-red"><input id="toggle-fuel" type="checkbox" checked><span>FUEL ADD</span></label>
+            </div>
+            <div class="zoom-controls">
+              <button class="zoom-button" id="zoom-out" title="축소" aria-label="축소">−</button>
+              <span id="zoom-level">1.0x</span>
+              <button class="zoom-button" id="zoom-in" title="확대" aria-label="확대">+</button>
+              <button class="zoom-button" id="zoom-reset" title="전체 구간 보기" aria-label="확대 초기화">↺</button>
+            </div>
+          </div>
+        </div>
+        <canvas id="trace"></canvas>
+        <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+      </div>
+      <div class="data-table-wrap">
+        <table>
+          <thead><tr><th>Elapsed</th><th>RPM</th><th>Speed km/h</th><th>Throttle %</th><th>Fuel Add</th><th>GPS Age</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="6" class="muted">NO DATA</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    let sessions = [];
+    let selectedId = null;
+    let selectedSession = null;
+    let currentRows = [];
+    let loadedSignature = '';
+    let displayedSessionId = null;
+    let runFirstTs = null;
+    let viewStart = 0;
+    let viewEnd = 1;
+    let hoverIndex = null;
+    let dragging = false;
+    let dragX = 0;
+
+    function dateText(ts) {
+      return new Date(ts * 1000).toLocaleString('ko-KR', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    }
+
+    function durationParts(start, end) {
+      if (!start) return {value:'--', unit:''};
+      const seconds = Math.max(0, (end || Date.now() / 1000) - start);
+      const minutes = Math.floor(seconds / 60);
+      const remain = Math.floor(seconds % 60);
+      return minutes
+        ? {value:`${minutes}:${String(remain).padStart(2, '0')}`, unit:'min:s'}
+        : {value:`${remain}`, unit:'s'};
+    }
+
+    function renderSessions() {
+      const host = $('sessions');
+      host.replaceChildren();
+      $('session-count').textContent = sessions.length;
+      if (!sessions.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'NO RECORDED SESSION';
+        host.append(empty);
+        return;
+      }
+      sessions.forEach(session => {
+        const button = document.createElement('button');
+        button.className = 'session-row' + (session.id === selectedId ? ' active' : '');
+        const name = document.createElement('span');
+        name.className = 'session-name';
+        name.textContent = `#${session.id}  ${session.name}`;
+        const meta = document.createElement('span');
+        meta.className = 'session-meta';
+        const time = document.createElement('span');
+        time.textContent = dateText(session.start_ts);
+        const count = document.createElement('span');
+        count.className = session.end_ts == null ? 'live' : '';
+        count.textContent = session.end_ts == null ? '● REC' : `${session.samples} pts`;
+        meta.append(time, count);
+        button.append(name, meta);
+        button.onclick = () => selectSession(session.id);
+        host.append(button);
+      });
+    }
+
+    async function loadSessions() {
+      try {
+        const data = await fetch('/api/sessions', {cache:'no-store'}).then(r => r.json());
+        sessions = data.sessions;
+        if (selectedId === null && sessions.length) {
+          const queryId = Number(new URLSearchParams(location.search).get('session'));
+          selectedId = sessions.some(s => s.id === queryId) ? queryId : sessions[0].id;
+        }
+        selectedSession = sessions.find(s => s.id === selectedId) || null;
+        renderSessions();
+        const signature = selectedSession
+          ? `${selectedSession.id}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`
+          : '';
+        if (selectedSession && signature !== loadedSignature) await loadRun();
+      } catch (error) {
+        $('load-state').textContent = 'SERVER OFFLINE';
+      }
+    }
+
+    async function selectSession(id) {
+      selectedId = id;
+      selectedSession = sessions.find(s => s.id === id) || null;
+      loadedSignature = '';
+      history.replaceState(null, '', `/logs?session=${id}`);
+      renderSessions();
+      await loadRun();
+    }
+
+    async function loadRun() {
+      if (!selectedSession) return;
+      $('load-state').textContent = 'LOADING';
+      const data = await fetch(`/api/logs?session_id=${selectedId}&limit=10000`, {cache:'no-store'}).then(r => r.json());
+      const summary = data.summary;
+      currentRows = data.rows.slice().reverse();
+      runFirstTs = summary.first_ts;
+      if (displayedSessionId !== selectedId) resetZoom();
+      displayedSessionId = selectedId;
+      $('run-name').textContent = `#${selectedSession.id}  ${selectedSession.name}`;
+      $('run-meta').textContent = `${dateText(selectedSession.start_ts)} · ${selectedSession.end_ts == null ? 'RECORDING NOW' : 'RUN COMPLETE'}`;
+      $('samples').textContent = summary.samples;
+      const duration = durationParts(selectedSession.start_ts, selectedSession.end_ts);
+      $('duration').innerHTML = `${duration.value}<span class="metric-unit">${duration.unit}</span>`;
+      $('maxrpm').textContent = summary.max_rpm ?? '--';
+      $('maxspeed').innerHTML = `${summary.max_speed == null ? '--' : summary.max_speed.toFixed(1)}<span class="metric-unit">km/h</span>`;
+      $('avgfuel').textContent = summary.avg_fuel == null ? '--' : `${summary.avg_fuel >= 0 ? '+' : ''}${summary.avg_fuel.toFixed(1)}`;
+      renderRows(data.rows, summary.first_ts);
+      drawTrace();
+      loadedSignature = `${selectedSession.id}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`;
+      $('load-state').textContent = selectedSession.end_ts == null ? '● LIVE SESSION' : 'SESSION LOADED';
+    }
+
+    function renderRows(rows, firstTs) {
+      const body = $('rows');
+      body.replaceChildren();
+      if (!rows.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 6;
+        td.className = 'muted';
+        td.textContent = 'NO SAMPLES IN THIS SESSION';
+        tr.append(td); body.append(tr); return;
+      }
+      rows.forEach(row => {
+        const values = [
+          `+${(row.ts - firstTs).toFixed(1)}s`,
+          row.rpm,
+          row.speed_kmh == null ? '--' : row.speed_kmh.toFixed(1),
+          row.throttle_percent,
+          `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}`,
+          row.gps_age == null ? '--' : `${row.gps_age.toFixed(1)}s`
+        ];
+        const tr = document.createElement('tr');
+        values.forEach(value => { const td = document.createElement('td'); td.textContent = value; tr.append(td); });
+        body.append(tr);
+      });
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function resetZoom() {
+      viewStart = 0;
+      viewEnd = 1;
+      hoverIndex = null;
+      hideTooltip();
+      updateZoomLabel();
+    }
+
+    function updateZoomLabel() {
+      $('zoom-level').textContent = `${(1 / Math.max(.0001, viewEnd - viewStart)).toFixed(1)}x`;
+    }
+
+    function zoomTrace(factor, center = .5) {
+      if (currentRows.length < 2) return;
+      const oldSpan = viewEnd - viewStart;
+      const minSpan = Math.max(10 / currentRows.length, .002);
+      const newSpan = clamp(oldSpan * factor, minSpan, 1);
+      const anchor = viewStart + oldSpan * clamp(center, 0, 1);
+      let start = anchor - newSpan * clamp(center, 0, 1);
+      start = clamp(start, 0, 1 - newSpan);
+      viewStart = start;
+      viewEnd = start + newSpan;
+      hoverIndex = null;
+      hideTooltip();
+      updateZoomLabel();
+      drawTrace();
+    }
+
+    function panTrace(pixelDelta) {
+      const canvas = $('trace');
+      const plotWidth = Math.max(1, canvas.clientWidth - 105);
+      const span = viewEnd - viewStart;
+      const shift = -pixelDelta / plotWidth * span;
+      const start = clamp(viewStart + shift, 0, 1 - span);
+      viewStart = start;
+      viewEnd = start + span;
+      updateZoomLabel();
+      drawTrace();
+    }
+
+    function visibleRange() {
+      const last = Math.max(0, currentRows.length - 1);
+      return {
+        start: clamp(Math.floor(viewStart * last), 0, last),
+        end: clamp(Math.ceil(viewEnd * last), 0, last)
+      };
+    }
+
+    function hideTooltip() {
+      $('chart-tooltip').hidden = true;
+    }
+
+    function showTooltip(event, row) {
+      const tooltip = $('chart-tooltip');
+      const panel = document.querySelector('.chart-panel');
+      const elapsed = runFirstTs == null ? 0 : row.ts - runFirstTs;
+      const speed = row.speed_kmh == null ? '--' : `${row.speed_kmh.toFixed(1)} km/h`;
+      const fuel = `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}`;
+      tooltip.innerHTML = `
+        <div class="tooltip-time">+${elapsed.toFixed(1)}s · ${new Date(row.ts * 1000).toLocaleTimeString('ko-KR')}</div>
+        <div class="tooltip-row"><span class="signal-green">RPM</span><b>${row.rpm}</b></div>
+        <div class="tooltip-row"><span class="signal-blue">SPEED</span><b>${speed}</b></div>
+        <div class="tooltip-row"><span class="signal-amber">THROTTLE</span><b>${row.throttle_percent}%</b></div>
+        <div class="tooltip-row"><span class="signal-red">FUEL ADD</span><b>${fuel}</b></div>`;
+      tooltip.hidden = false;
+      const panelRect = panel.getBoundingClientRect();
+      let left = event.clientX - panelRect.left + 12;
+      let top = event.clientY - panelRect.top + 12;
+      left = Math.min(left, panel.clientWidth - tooltip.offsetWidth - 8);
+      top = Math.min(top, panel.clientHeight - tooltip.offsetHeight - 8);
+      tooltip.style.left = `${Math.max(8, left)}px`;
+      tooltip.style.top = `${Math.max(45, top)}px`;
+    }
+
+    function drawTrace() {
+      const canvas = $('trace');
+      const rect = canvas.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * scale));
+      canvas.height = Math.max(1, Math.floor(rect.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      const w = rect.width, h = rect.height, pad = {l:55, r:50, t:24, b:24};
+      ctx.clearRect(0, 0, w, h);
+      ctx.font = '10px Consolas';
+      ctx.fillStyle = '#777';
+      ctx.strokeStyle = '#1c1c1c';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (h - pad.t - pad.b) * i / 4;
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      }
+      if (currentRows.length < 2) {
+        ctx.fillText('WAITING FOR RUN DATA', pad.l, pad.t + 20);
+        return;
+      }
+      const range = visibleRange();
+      const visible = currentRows.slice(range.start, range.end + 1);
+      const firstTime = visible[0].ts;
+      const lastTime = visible[visible.length - 1].ts;
+      const timeSpan = Math.max(.001, lastTime - firstTime);
+      let maxRpmValue = 0, maxSpeedValue = 0, minFuel = 0, maxFuel = 0;
+      visible.forEach(row => {
+        maxRpmValue = Math.max(maxRpmValue, row.rpm);
+        if (row.speed_kmh != null) maxSpeedValue = Math.max(maxSpeedValue, row.speed_kmh);
+        minFuel = Math.min(minFuel, row.fuel_add);
+        maxFuel = Math.max(maxFuel, row.fuel_add);
+      });
+      const maxRpm = Math.max(1000, Math.ceil(maxRpmValue / 1000) * 1000);
+      const maxSpeed = Math.max(10, Math.ceil(maxSpeedValue / 10) * 10);
+      if (minFuel === maxFuel) maxFuel = minFuel + 1;
+      if ($('toggle-rpm').checked) {
+        ctx.fillStyle = '#25e58d'; ctx.fillText(`RPM 0—${maxRpm}`, 4, 12);
+      }
+      if ($('toggle-speed').checked) {
+        ctx.fillStyle = '#37b9ff'; ctx.textAlign = 'right'; ctx.fillText(`SPEED 0—${maxSpeed}`, w - 4, 12); ctx.textAlign = 'left';
+      }
+      if ($('toggle-fuel').checked) {
+        ctx.fillStyle = '#ff4d5e'; ctx.textAlign = 'center';
+        ctx.fillText(`FUEL ADD ${minFuel}—+${maxFuel}`, w / 2, 12); ctx.textAlign = 'left';
+        const zeroY = h - pad.b - (h - pad.t - pad.b) * (0 - minFuel) / (maxFuel - minFuel);
+        ctx.strokeStyle = '#532027'; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(pad.l, zeroY); ctx.lineTo(w - pad.r, zeroY); ctx.stroke(); ctx.setLineDash([]);
+      }
+      const plot = (color, getter, min, max) => {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+        let started = false;
+        visible.forEach(row => {
+          const value = getter(row);
+          if (value == null) { started = false; return; }
+          const x = pad.l + (w - pad.l - pad.r) * (row.ts - firstTime) / timeSpan;
+          const y = h - pad.b - (h - pad.t - pad.b) * (value - min) / (max - min);
+          if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+      if ($('toggle-rpm').checked) plot('#25e58d', row => row.rpm, 0, maxRpm);
+      if ($('toggle-speed').checked) plot('#37b9ff', row => row.speed_kmh, 0, maxSpeed);
+      if ($('toggle-fuel').checked) plot('#ff4d5e', row => row.fuel_add, minFuel, maxFuel);
+      ctx.fillStyle = '#777';
+      const startElapsed = runFirstTs == null ? 0 : firstTime - runFirstTs;
+      const endElapsed = runFirstTs == null ? timeSpan : lastTime - runFirstTs;
+      ctx.fillText(`+${startElapsed.toFixed(1)}s`, pad.l, h - 7);
+      ctx.textAlign = 'right'; ctx.fillText(`+${endElapsed.toFixed(1)}s`, w - pad.r, h - 7); ctx.textAlign = 'left';
+      if (hoverIndex != null && hoverIndex >= range.start && hoverIndex <= range.end) {
+        const row = currentRows[hoverIndex];
+        const x = pad.l + (w - pad.l - pad.r) * (row.ts - firstTime) / timeSpan;
+        ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+      }
+    }
+
+    ['toggle-rpm', 'toggle-speed', 'toggle-fuel'].forEach(id => $(id).addEventListener('change', drawTrace));
+    $('zoom-in').onclick = () => zoomTrace(.6);
+    $('zoom-out').onclick = () => zoomTrace(1.65);
+    $('zoom-reset').onclick = () => { resetZoom(); drawTrace(); };
+    $('trace').addEventListener('wheel', event => {
+      event.preventDefault();
+      const rect = $('trace').getBoundingClientRect();
+      const center = clamp((event.clientX - rect.left - 55) / Math.max(1, rect.width - 105), 0, 1);
+      zoomTrace(event.deltaY < 0 ? .78 : 1.28, center);
+    }, {passive:false});
+    $('trace').addEventListener('pointerdown', event => {
+      if (viewEnd - viewStart >= .999) return;
+      dragging = true; dragX = event.clientX;
+      $('trace').classList.add('dragging');
+      $('trace').setPointerCapture(event.pointerId);
+    });
+    $('trace').addEventListener('pointermove', event => {
+      if (dragging) {
+        const delta = event.clientX - dragX;
+        dragX = event.clientX;
+        panTrace(delta);
+        hideTooltip();
+        return;
+      }
+      if (currentRows.length < 2) return;
+      const rect = $('trace').getBoundingClientRect();
+      const ratio = clamp((event.clientX - rect.left - 55) / Math.max(1, rect.width - 105), 0, 1);
+      const range = visibleRange();
+      hoverIndex = clamp(Math.round(range.start + ratio * (range.end - range.start)), range.start, range.end);
+      drawTrace();
+      showTooltip(event, currentRows[hoverIndex]);
+    });
+    const endDrag = event => {
+      if (!dragging) return;
+      dragging = false;
+      $('trace').classList.remove('dragging');
+      if ($('trace').hasPointerCapture(event.pointerId)) $('trace').releasePointerCapture(event.pointerId);
+    };
+    $('trace').addEventListener('pointerup', endDrag);
+    $('trace').addEventListener('pointercancel', endDrag);
+    $('trace').addEventListener('pointerleave', () => { if (!dragging) { hoverIndex = null; hideTooltip(); drawTrace(); } });
+    window.addEventListener('resize', drawTrace);
+    setInterval(loadSessions, 3000);
+    loadSessions();
+  </script>
+</body>
+</html>
