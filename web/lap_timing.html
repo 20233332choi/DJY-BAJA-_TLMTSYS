@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJY Dual GPS Lap Timing</title>
+  <link rel="stylesheet" href="/djy.css">
+  <style>html.embed-mode body > .topbar { display: none !important; }</style>
+  <style>
+    :root { --green: #00ff00; --blue: #00ffff; --amber: #ffff00; --red: #ff0000; }
+    body { min-height: 100vh; background: #000; }
+    .control { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: minmax(220px, 1fr) 100px 100px auto auto auto; align-items: end; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line-strong); background: #000; }
+    .gate-state { min-width: 0; }
+    .gate-state strong, .gate-state span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gate-state strong { color: var(--red); font: 900 15px Consolas, monospace; }
+    .gate-state strong.ready { color: var(--green); }
+    .gate-state span { margin-top: 5px; color: var(--muted); font: 9px Consolas, monospace; }
+    .field label { display: block; margin-bottom: 5px; color: var(--muted); font: 8px Consolas, monospace; }
+    .field input { width: 100%; height: 38px; padding: 0 8px; border: 1px solid var(--line-strong); outline: none; background: #050505; color: #fff; font: 13px Consolas, monospace; }
+    .control button { height: 38px; padding: 0 11px; border: 2px solid var(--green); background: #020202; color: var(--green); font: 800 11px Consolas, monospace; cursor: pointer; white-space: nowrap; }
+    .control .reset { border-color: var(--red); color: var(--red); }
+    .control button.caution { border-color: var(--amber); color: var(--amber); }
+    #command-status { min-height: 30px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px Consolas, monospace; }
+    #command-status.error { color: var(--red); }
+    .pit-command-panel { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line-strong); background: #020202; }
+    .pit-command-title strong, .pit-command-title span { display: block; }
+    .pit-command-title strong { color: #fff; font: 900 13px Consolas, monospace; }
+    .pit-command-title span { margin-top: 4px; color: var(--muted); font: 9px Consolas, monospace; }
+    .pit-targets, .pit-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pit-targets button, .pit-buttons button { height: 36px; padding: 0 12px; border: 2px solid #444; background: #000; color: #aaa; font: 900 10px Consolas, monospace; cursor: pointer; }
+    .pit-targets button.selected { border-color: var(--blue); color: var(--blue); }
+    .pit-buttons [data-pit-command="GREEN"] { border-color: #00ff00; color: #00ff00; }
+    .pit-buttons [data-pit-command="YELLOW"] { border-color: #ffff00; color: #ffff00; }
+    .pit-buttons [data-pit-command="RED"], .pit-buttons [data-pit-command="STOP"] { border-color: #ff0000; color: #ff0000; }
+    .pit-buttons [data-pit-command="CHECKERED"] { border-color: #fff; background: repeating-conic-gradient(#fff 0 25%, #000 0 50%) 50% / 10px 10px; color: #000; text-shadow: 0 0 2px #fff; }
+    .pit-buttons [data-pit-command="BOX"] { border-color: #ff7b00; background: #ff7b00; color: #000; }
+    .pit-buttons [data-pit-command="CLEAR"] { border-color: #fff; color: #fff; }
+    .cars { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line-strong); }
+    body.focus-a .cars, body.focus-b .cars { grid-template-columns: 1fr; }
+    body.focus-a .car[data-car="B"], body.focus-b .car[data-car="A"] { display: none; }
+    .car { min-width: 0; background: #000; }
+    .car-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 17px; border-bottom: 1px solid var(--line); }
+    .car-name { display: flex; align-items: center; gap: 10px; font: 900 clamp(20px, 3vw, 36px) Consolas, monospace; }
+    .car-letter { width: 42px; height: 42px; display: grid; place-items: center; border: 2px solid var(--amber); color: var(--amber); }
+    .gps-badge { padding: 5px 8px; border: 1px solid var(--red); color: var(--red); font: 800 9px Consolas, monospace; }
+    .gps-badge.live { border-color: var(--green); color: var(--green); }
+    .last-block { padding: clamp(18px, 3vw, 34px) 16px; border-bottom: 1px solid var(--line); text-align: center; }
+    .last-label { color: var(--muted); font: 10px Consolas, monospace; letter-spacing: .12em; }
+    .last-time { margin-top: 12px; overflow: hidden; color: var(--blue); font: 950 clamp(58px, 9.5vw, 138px)/.9 Consolas, monospace; letter-spacing: -.07em; white-space: nowrap; }
+    .last-block.flash { animation: lap-flash .8s ease-out; }
+    @keyframes lap-flash { 0% { background: #00ffff; } 20% { background: #002828; } 100% { background: #000; } }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+    .metric-cell { min-width: 0; padding: 13px 10px; border-right: 1px solid var(--line); }
+    .metric-cell:last-child { border-right: 0; }
+    .metric-cell label { color: var(--muted); font: 8px Consolas, monospace; }
+    .metric-cell strong { display: block; margin-top: 7px; overflow: hidden; font: 850 clamp(16px, 2.4vw, 29px) Consolas, monospace; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .current { color: var(--amber); }
+    .best { color: var(--blue); }
+    .delta.faster { color: var(--green); }
+    .delta.slower { color: var(--red); }
+    .car-foot { display: grid; grid-template-columns: 1fr 1fr; min-height: 140px; }
+    .telemetry, .lap-list { padding: 13px 16px; }
+    .telemetry { border-right: 1px solid var(--line); }
+    .telemetry p { margin: 0 0 7px; color: #aaa; font: 11px Consolas, monospace; }
+    .telemetry p span { float: right; color: #eee; }
+    .timing-state { margin-top: 14px; color: var(--amber); font: 800 10px Consolas, monospace; }
+    .lap-list h3 { margin: 0 0 8px; color: var(--muted); font: 9px Consolas, monospace; }
+    .lap-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #151515; color: #bbb; font: 11px Consolas, monospace; }
+    .lap-row b { color: #fff; }
+    .track-map { border-top: 1px solid var(--line-strong); background: #000; }
+    .track-map-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font: 9px Consolas, monospace; }
+    .map-legend { display: flex; gap: 14px; }
+    .map-tools, .marker-size { display: flex; align-items: center; gap: 12px; }
+    .map-mode { display: flex; gap: 5px; }
+    .map-mode button { height: 30px; padding: 0 9px; border: 1px solid #555; background: #000; color: #888; font: 800 9px Consolas, monospace; cursor: pointer; }
+    .map-mode button.selected { border-color: var(--green); color: var(--green); }
+    .map-mode button[data-map-clear] { border-color: var(--red); color: var(--red); }
+    .marker-size { color: #aaa; white-space: nowrap; }
+    .marker-size input { width: 130px; accent-color: var(--red); }
+    .marker-size output { min-width: 42px; color: #fff; text-align: right; }
+    .map-legend b:nth-child(1) { color: var(--amber); }
+    .map-legend b:nth-child(2) { color: var(--blue); }
+    .map-legend b:nth-child(3) { color: var(--red); }
+    #track-canvas { display: block; width: 100%; height: min(36vh, 340px); background: #020202; }
+    @media (max-width: 900px) {
+      .control { grid-template-columns: 1fr 1fr; position: static; }
+      .pit-command-panel { grid-template-columns: 1fr; }
+      .gate-state { grid-column: 1 / 3; }
+      .cars { grid-template-columns: 1fr; }
+      .last-time { font-size: clamp(62px, 18vw, 120px); }
+      .track-map-head, .map-tools { align-items: flex-start; flex-direction: column; }
+    }
+    @media (max-width: 520px) {
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .metric-cell { border-bottom: 1px solid var(--line); }
+      .car-foot { grid-template-columns: 1fr; }
+      .telemetry { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+  <script>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed-mode');</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>대자연 DJY · GPS LAP TIMING</h1><small>DUAL VEHICLE / LOCAL TIMING</small></div>
+    <nav class="nav"><a href="/">HOME</a><a href="/phone?vehicle=A" target="_blank" rel="noopener">PHONE A ↗</a><a href="/phone?vehicle=B" target="_blank" rel="noopener">PHONE B ↗</a><a href="/map" target="_blank" rel="noopener">REAL MAP ↗</a><a href="/timing">SPEEDHIVE</a></nav>
+  </header>
+
+  <section class="control">
+    <div class="gate-state"><strong id="gate-title">START LINE NOT SET</strong><span id="gate-detail">차량이 출발선을 통과할 때 해당 차량 설정 버튼을 누르세요.</span></div>
+    <div class="field"><label for="gate-width">HALF WIDTH (m)</label><input id="gate-width" type="number" min="5" max="100" step="1" value="25"></div>
+    <div class="field"><label for="min-lap">MIN LAP (s)</label><input id="min-lap" type="number" min="5" max="3600" step="1" value="20"></div>
+    <button data-gate-vehicle="A">A로 출발선 설정</button>
+    <button data-gate-vehicle="B">B로 출발선 설정</button>
+    <button class="reset" id="reset-timing">새 측정 시작</button>
+  </section>
+  <div id="command-status">차량 A/B 휴대폰 GPS를 먼저 연결하세요.</div>
+  <section class="pit-command-panel">
+    <div class="pit-command-title"><strong>PIT → DRIVER</strong><span id="pit-command-status">NO MANUAL COMMAND</span></div>
+    <div class="pit-targets"><button class="selected" data-pit-target="ALL">ALL</button><button data-pit-target="A">A</button><button data-pit-target="B">B</button></div>
+    <div class="pit-buttons"><button data-pit-command="GREEN">GREEN</button><button data-pit-command="YELLOW">YELLOW</button><button data-pit-command="RED">RED</button><button data-pit-command="STOP">STOP</button><button data-pit-command="CHECKERED">CHEQUERED FLAG</button><button data-pit-command="BOX">BOX THIS LAP</button><button data-pit-command="CLEAR">CLEAR</button></div>
+  </section>
+
+  <main class="cars">
+    <section class="car" data-car="A">
+      <header class="car-head"><div class="car-name"><span class="car-letter">A</span>VEHICLE A</div><span class="gps-badge" data-field="gps">GPS OFFLINE</span></header>
+      <div class="last-block" data-field="last-block"><div class="last-label">LAST LAP</div><div class="last-time" data-field="last">--:--.---</div></div>
+      <div class="metrics">
+        <div class="metric-cell"><label>CURRENT</label><strong class="current" data-field="current">--:--.---</strong></div>
+        <div class="metric-cell"><label>BEST</label><strong class="best" data-field="best">--:--.---</strong></div>
+        <div class="metric-cell"><label>DELTA PREV</label><strong class="delta" data-field="delta">--</strong></div>
+        <div class="metric-cell"><label>LAPS</label><strong data-field="laps">0</strong></div>
+      </div>
+      <div class="car-foot"><div class="telemetry"><p>SPEED <span data-field="speed">--.- km/h</span></p><p>GPS ACC <span data-field="accuracy">-- m</span></p><p>GPS READY <span data-field="ready">WAIT</span></p><p>GPS RATE <span data-field="rate">-- Hz</span></p><p>FILTER <span data-field="filter">--</span></p><p>HEADING <span data-field="heading">--°</span></p><div class="timing-state" data-field="state">WAITING FOR GPS</div></div><div class="lap-list"><h3>RECENT LAPS</h3><div data-field="recent"><div class="lap-row"><span>--</span><b>--:--.---</b></div></div></div></div>
+    </section>
+
+    <section class="car" data-car="B">
+      <header class="car-head"><div class="car-name"><span class="car-letter">B</span>VEHICLE B</div><span class="gps-badge" data-field="gps">GPS OFFLINE</span></header>
+      <div class="last-block" data-field="last-block"><div class="last-label">LAST LAP</div><div class="last-time" data-field="last">--:--.---</div></div>
+      <div class="metrics">
+        <div class="metric-cell"><label>CURRENT</label><strong class="current" data-field="current">--:--.---</strong></div>
+        <div class="metric-cell"><label>BEST</label><strong class="best" data-field="best">--:--.---</strong></div>
+        <div class="metric-cell"><label>DELTA PREV</label><strong class="delta" data-field="delta">--</strong></div>
+        <div class="metric-cell"><label>LAPS</label><strong data-field="laps">0</strong></div>
+      </div>
+      <div class="car-foot"><div class="telemetry"><p>SPEED <span data-field="speed">--.- km/h</span></p><p>GPS ACC <span data-field="accuracy">-- m</span></p><p>GPS READY <span data-field="ready">WAIT</span></p><p>GPS RATE <span data-field="rate">-- Hz</span></p><p>FILTER <span data-field="filter">--</span></p><p>HEADING <span data-field="heading">--°</span></p><div class="timing-state" data-field="state">WAITING FOR GPS</div></div><div class="lap-list"><h3>RECENT LAPS</h3><div data-field="recent"><div class="lap-row"><span>--</span><b>--:--.---</b></div></div></div></div>
+    </section>
+  </main>
+
+  <section class="track-map">
+    <header class="track-map-head"><span id="map-state">GPS STABILIZING · TRAIL PAUSED</span><div class="map-tools"><span class="map-legend"><b>● A</b><b>● B</b><b>━ START</b></span><span class="map-mode"><button class="selected" data-map-mode="start">START LOCK</button><button data-map-mode="auto">AUTO FIT</button><button data-map-clear>CLEAR TRAIL</button></span><label class="marker-size">START SIZE <input id="start-marker-size" type="range" min="40" max="200" step="10"><output id="start-marker-output"></output></label></div></header>
+    <canvas id="track-canvas"></canvas>
+  </section>
+
+  <script>
+    const anchors = {A:null, B:null};
+    const previousLapCounts = {A:0, B:0};
+    const trails = {A:[], B:[]};
+    const mapVehicleArmed = {A:false, B:false};
+    let latestGate = null;
+    const latestVehicles = {A:null, B:null};
+    const savedMarkerSize = Number(localStorage.getItem('djy_start_marker_px'));
+    let startMarkerPx = Number.isFinite(savedMarkerSize) && savedMarkerSize >= 40 && savedMarkerSize <= 200 ? savedMarkerSize : 100;
+    let loading = false;
+    let pitTarget = 'ALL';
+    let pitCommandLoading = false;
+    let latestPitCommandData = {commands:[]};
+    let mapMode = localStorage.getItem('djy_map_mode') === 'auto' ? 'auto' : 'start';
+
+    function field(vehicleId, name) {
+      return document.querySelector(`[data-car="${vehicleId}"] [data-field="${name}"]`);
+    }
+
+    function formatLap(seconds) {
+      if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '--:--.---';
+      const value = Math.max(0, Number(seconds));
+      const minutes = Math.floor(value / 60);
+      return `${minutes}:${(value % 60).toFixed(3).padStart(6, '0')}`;
+    }
+
+    function renderPitCommands(data) {
+      latestPitCommandData = data;
+      const commands = data.commands.length ? data.commands.map(item => `${item.target}:${item.command}`).join(' · ') : 'NO MANUAL COMMAND';
+      document.getElementById('pit-command-status').textContent = `VIEW/SEND ${pitTarget} · ${commands}`;
+    }
+
+    function setPitTarget(target) {
+      pitTarget = target;
+      document.body.classList.toggle('focus-a', target === 'A');
+      document.body.classList.toggle('focus-b', target === 'B');
+      document.querySelectorAll('[data-pit-target]').forEach(item => item.classList.toggle('selected', item.dataset.pitTarget === target));
+      renderPitCommands(latestPitCommandData);
+      drawTrackMap();
+    }
+
+    async function refreshPitCommands() {
+      try {
+        const response = await fetch('/api/pit-command', {cache:'no-store'});
+        const data = await response.json();
+        if (response.ok) renderPitCommands(data);
+      } catch (_) {}
+    }
+
+    async function sendPitCommand(command) {
+      if (pitCommandLoading) return;
+      if (['RED','STOP','CHECKERED'].includes(command) && !confirm(`${command} 신호를 ${pitTarget} 드라이버에게 보낼까요?`)) return;
+      pitCommandLoading = true;
+      try {
+        renderPitCommands(await post('/api/pit-command', {command, target:pitTarget}));
+      } catch (error) {
+        document.getElementById('pit-command-status').textContent = `SEND ERROR · ${error.message}`;
+      } finally {
+        pitCommandLoading = false;
+      }
+    }
+
+    function cardinalDirection(heading) {
+      if (heading === null || heading === undefined || !Number.isFinite(Number(heading))) return '--';
+      const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      return directions[Math.round((Number(heading) % 360) / 45) % 8];
+    }
+
+    function renderVehicle(vehicleId, vehicle) {
+      const gps = field(vehicleId, 'gps');
+      gps.textContent = vehicle.gps_live ? '● GPS LIVE' : 'GPS OFFLINE';
+      gps.classList.toggle('live', vehicle.gps_live);
+      field(vehicleId, 'last').textContent = formatLap(vehicle.last_lap_s);
+      field(vehicleId, 'best').textContent = formatLap(vehicle.best_lap_s);
+      field(vehicleId, 'laps').textContent = vehicle.lap_count;
+      field(vehicleId, 'speed').textContent = vehicle.speed_kmh == null ? '--.- km/h' : `${Number(vehicle.speed_kmh).toFixed(1)} km/h`;
+      field(vehicleId, 'accuracy').textContent = vehicle.accuracy_m == null ? '-- m' : `${Number(vehicle.accuracy_m).toFixed(1)} m`;
+      field(vehicleId, 'rate').textContent = vehicle.sample_hz == null ? '-- Hz' : `${Number(vehicle.sample_hz).toFixed(1)} Hz`;
+      const stableSeconds = Math.min(15, Math.floor(vehicle.gps_stable_s || 0));
+      const ready = field(vehicleId, 'ready');
+      ready.textContent = vehicle.gps_ready ? '● READY' : (vehicle.accuracy_m != null && vehicle.accuracy_m <= 15 ? `${stableSeconds}/15 s` : 'NEED ≤15m');
+      ready.style.color = vehicle.gps_ready ? '#00ff00' : '#ffff00';
+      field(vehicleId, 'filter').textContent = vehicle.position_locked ? 'STILL LOCK' : `TRACK · ${vehicle.rejected_samples || 0} DROP`;
+      field(vehicleId, 'heading').textContent = vehicle.heading == null ? '--°' : `${Math.round(vehicle.heading)}° ${cardinalDirection(vehicle.heading)}`;
+      field(vehicleId, 'state').textContent = vehicle.timing_status;
+
+      const delta = field(vehicleId, 'delta');
+      delta.className = 'delta';
+      if (vehicle.delta_s == null) {
+        delta.textContent = '--';
+      } else if (vehicle.delta_s < 0) {
+        delta.textContent = `▲ ${Math.abs(vehicle.delta_s).toFixed(3)}`;
+        delta.classList.add('faster');
+      } else {
+        delta.textContent = `▼ ${Math.abs(vehicle.delta_s).toFixed(3)}`;
+        delta.classList.add('slower');
+      }
+
+      anchors[vehicleId] = vehicle.current_lap_s == null ? null : {seconds:Number(vehicle.current_lap_s), at:performance.now(), live:vehicle.gps_live};
+      const recent = vehicle.recent_laps || [];
+      field(vehicleId, 'recent').innerHTML = recent.length
+        ? recent.slice(0, 5).map(lap => `<div class="lap-row"><span>LAP ${lap.lap_number}</span><b>${formatLap(lap.lap_time_s)}</b></div>`).join('')
+        : '<div class="lap-row"><span>--</span><b>--:--.---</b></div>';
+
+      if (vehicle.lap_count > previousLapCounts[vehicleId]) {
+        const block = field(vehicleId, 'last-block');
+        block.classList.remove('flash');
+        void block.offsetWidth;
+        block.classList.add('flash');
+      }
+      previousLapCounts[vehicleId] = vehicle.lap_count;
+      latestVehicles[vehicleId] = vehicle;
+
+      if (vehicle.gps_ready) mapVehicleArmed[vehicleId] = true;
+      if (mapVehicleArmed[vehicleId] && vehicle.lat != null && vehicle.lon != null && vehicle.gps_live) {
+        const trail = trails[vehicleId];
+        const last = trail[trail.length - 1];
+        if (!last || Math.abs(last.lat - vehicle.lat) + Math.abs(last.lon - vehicle.lon) > 1e-8) {
+          trail.push({lat:Number(vehicle.lat), lon:Number(vehicle.lon)});
+          if (trail.length > 3000) trail.shift();
+        }
+      }
+    }
+
+    function render(data) {
+      const gate = data.gate;
+      latestGate = gate;
+      const title = document.getElementById('gate-title');
+      if (gate) {
+        title.textContent = '● START LINE READY';
+        title.classList.add('ready');
+        document.getElementById('gate-detail').textContent = `${gate.lat.toFixed(6)}, ${gate.lon.toFixed(6)} · DRIVE ${Math.round(gate.heading)}° ${cardinalDirection(gate.heading)} · WIDTH ±${gate.half_width_m}m`;
+        document.getElementById('gate-width').value = gate.half_width_m;
+        document.getElementById('min-lap').value = gate.min_lap_s;
+      } else {
+        title.textContent = 'START LINE NOT SET';
+        title.classList.remove('ready');
+      }
+      renderVehicle('A', data.vehicles.A);
+      renderVehicle('B', data.vehicles.B);
+      drawTrackMap();
+    }
+
+    function drawTrackMap() {
+      const canvas = document.getElementById('track-canvas');
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(320, canvas.clientWidth);
+      const height = Math.max(180, canvas.clientHeight);
+      if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      drawCompass(ctx, width, height);
+      const visibleVehicles = pitTarget === 'ALL' ? ['A','B'] : [pitTarget];
+      drawHeadingReadout(ctx, visibleVehicles);
+      const points = visibleVehicles.flatMap(vehicleId => trails[vehicleId]);
+      if (latestGate) points.push({lat:latestGate.lat, lon:latestGate.lon});
+      const armedCount = visibleVehicles.filter(vehicleId => mapVehicleArmed[vehicleId]).length;
+      const mapState = document.getElementById('map-state');
+      mapState.textContent = latestGate && mapMode === 'start'
+        ? 'START LOCK · NORTH UP ↑ · ±120m'
+        : (armedCount ? 'AUTO FIT · NORTH UP ↑' : 'GPS STABILIZING · TRAIL PAUSED');
+      if (!points.length) {
+        ctx.fillStyle = '#555'; ctx.font = '12px Consolas'; ctx.textAlign = 'center';
+        const waiting = visibleVehicles.map(vehicleId => {
+          const seconds = Math.min(15, Math.floor(latestVehicles[vehicleId]?.gps_stable_s || 0));
+          return `${vehicleId} ${seconds}/15s`;
+        }).join(' · ');
+        ctx.fillText(`WAITING FOR GPS READY · ${waiting}`, width / 2, height / 2);
+        return;
+      }
+      const startLocked = latestGate && mapMode === 'start';
+      const refLat = startLocked ? latestGate.lat : points.reduce((sum, point) => sum + point.lat, 0) / points.length;
+      const refLon = startLocked ? latestGate.lon : points.reduce((sum, point) => sum + point.lon, 0) / points.length;
+      const earth = 6371000;
+      const project = point => ({x:(point.lon-refLon)*Math.PI/180*earth*Math.cos(refLat*Math.PI/180), y:(point.lat-refLat)*Math.PI/180*earth});
+      const projected = points.map(project);
+      let minX, maxX, minY, maxY;
+      if (startLocked) {
+        minX = -120; maxX = 120; minY = -120; maxY = 120;
+      } else {
+        minX = Math.min(...projected.map(p => p.x)); maxX = Math.max(...projected.map(p => p.x));
+        minY = Math.min(...projected.map(p => p.y)); maxY = Math.max(...projected.map(p => p.y));
+        if (maxX - minX < 30) { minX -= 15; maxX += 15; }
+        if (maxY - minY < 30) { minY -= 15; maxY += 15; }
+      }
+      const pad = 24;
+      const scale = Math.min((width-pad*2)/(maxX-minX), (height-pad*2)/(maxY-minY));
+      const screen = point => { const p=project(point); return {x:width/2+(p.x-(minX+maxX)/2)*scale, y:height/2-(p.y-(minY+maxY)/2)*scale}; };
+      const drawTrail = (vehicleId, color) => {
+        const trail = trails[vehicleId]; if (!trail.length) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = .65; ctx.beginPath();
+        trail.forEach((point,index) => { const p=screen(point); index ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y); }); ctx.stroke();
+        const p=screen(trail[trail.length-1]); ctx.globalAlpha=1; ctx.fillStyle=color; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#000'; ctx.font='bold 10px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(vehicleId,p.x,p.y);
+        const rawHeading = latestVehicles[vehicleId]?.heading;
+        const heading = rawHeading == null ? NaN : Number(rawHeading);
+        if (Number.isFinite(heading)) {
+          const angle = heading*Math.PI/180;
+          const forwardX = Math.sin(angle), forwardY = -Math.cos(angle);
+          const sideX = -forwardY, sideY = forwardX;
+          const tip = {x:p.x+forwardX*31, y:p.y+forwardY*31};
+          ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=4;
+          ctx.beginPath(); ctx.moveTo(p.x+forwardX*9,p.y+forwardY*9); ctx.lineTo(tip.x,tip.y); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(tip.x,tip.y);
+          ctx.lineTo(tip.x-forwardX*12+sideX*7,tip.y-forwardY*12+sideY*7);
+          ctx.lineTo(tip.x-forwardX*12-sideX*7,tip.y-forwardY*12-sideY*7);
+          ctx.closePath(); ctx.fill();
+        }
+      };
+      if (visibleVehicles.includes('A')) drawTrail('A', '#ffff00');
+      if (visibleVehicles.includes('B')) drawTrail('B', '#00ffff');
+      if (latestGate) {
+        const center = screen(latestGate); const angle = latestGate.heading*Math.PI/180;
+        const visibleHalfLength = startMarkerPx/2;
+        const dx = Math.cos(angle)*visibleHalfLength; const dy = Math.sin(angle)*visibleHalfLength;
+        const ax=center.x-dx, ay=center.y+dy, bx=center.x+dx, by=center.y-dy;
+        ctx.save();
+        ctx.strokeStyle='#ffffff'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+        ctx.strokeStyle='#ff0000'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+        for (const endpoint of [{x:ax,y:ay},{x:bx,y:by}]) {
+          ctx.fillStyle='#ff0000'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(endpoint.x,endpoint.y,5,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        }
+        const forwardX=Math.sin(angle), forwardY=-Math.cos(angle);
+        const arrowStart={x:center.x+forwardX*15,y:center.y+forwardY*15};
+        const arrowEnd={x:center.x+forwardX*64,y:center.y+forwardY*64};
+        ctx.strokeStyle='#ffff00'; ctx.fillStyle='#ffff00'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(arrowStart.x,arrowStart.y); ctx.lineTo(arrowEnd.x,arrowEnd.y); ctx.stroke();
+        const sideX=-forwardY, sideY=forwardX;
+        ctx.beginPath(); ctx.moveTo(arrowEnd.x,arrowEnd.y); ctx.lineTo(arrowEnd.x-forwardX*18+sideX*10,arrowEnd.y-forwardY*18+sideY*10); ctx.lineTo(arrowEnd.x-forwardX*18-sideX*10,arrowEnd.y-forwardY*18-sideY*10); ctx.closePath(); ctx.fill();
+        ctx.font='bold 15px Consolas'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+        const labelX=center.x-forwardX*18, labelY=center.y-forwardY*18;
+        const textWidth=ctx.measureText('START').width;
+        ctx.fillStyle='#ff0000'; ctx.fillRect(labelX-textWidth/2-7,labelY-20,textWidth+14,22);
+        ctx.fillStyle='#ffffff'; ctx.fillText('START',labelX,labelY-2);
+        const directionText=`${cardinalDirection(latestGate.heading)} ${Math.round(latestGate.heading)}°`;
+        ctx.font='bold 14px Consolas'; ctx.textAlign='center'; ctx.textBaseline='top';
+        const directionWidth=ctx.measureText(directionText).width;
+        const directionX=arrowEnd.x+forwardX*8, directionY=arrowEnd.y+forwardY*8;
+        ctx.fillStyle='#000000'; ctx.fillRect(directionX-directionWidth/2-6,directionY-2,directionWidth+12,22);
+        ctx.fillStyle='#ffff00'; ctx.fillText(directionText,directionX,directionY+2);
+        ctx.restore();
+      }
+    }
+
+    function drawHeadingReadout(ctx, visibleVehicles) {
+      ctx.save();
+      ctx.textBaseline = 'middle';
+      visibleVehicles.forEach((vehicleId, index) => {
+        const color = vehicleId === 'A' ? '#ffff00' : '#00ffff';
+        const rawHeading = latestVehicles[vehicleId]?.heading;
+        const heading = rawHeading == null ? NaN : Number(rawHeading);
+        const value = Number.isFinite(heading) ? `${Math.round(heading)}° ${cardinalDirection(heading)}` : '--°';
+        const y = 18 + index*40;
+        ctx.fillStyle = 'rgba(0,0,0,.9)';
+        ctx.fillRect(12,y-13,148,31);
+        ctx.strokeStyle = color; ctx.lineWidth = 2;
+        ctx.strokeRect(12,y-13,148,31);
+        ctx.fillStyle = color; ctx.font = 'bold 11px Consolas'; ctx.textAlign = 'left';
+        ctx.fillText(`${vehicleId} HEADING`,20,y-3);
+        ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px Consolas'; ctx.textAlign = 'right';
+        ctx.fillText(value,152,y+1);
+      });
+      ctx.restore();
+    }
+
+    function drawCompass(ctx, width, height) {
+      ctx.save();
+      ctx.strokeStyle='#171717'; ctx.lineWidth=1;
+      for (let x=width/4; x<width; x+=width/4) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
+      for (let y=height/4; y<height; y+=height/4) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
+
+      ctx.font='bold 18px Consolas'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle='#ff0000'; ctx.fillText('N',width/2,17);
+      ctx.fillStyle='#ffffff'; ctx.fillText('S',width/2,height-17);
+      ctx.fillText('W',17,height/2); ctx.fillText('E',width-17,height/2);
+
+      const cx=width-58, cy=58, radius=34;
+      ctx.fillStyle='rgba(0,0,0,.82)'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(cx,cy,radius,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle='#555'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(cx-radius+7,cy); ctx.lineTo(cx+radius-7,cy); ctx.moveTo(cx,cy-radius+7); ctx.lineTo(cx,cy+radius-7); ctx.stroke();
+      ctx.fillStyle='#ff0000'; ctx.beginPath(); ctx.moveTo(cx,cy-radius+5); ctx.lineTo(cx-8,cy+5); ctx.lineTo(cx+8,cy+5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.moveTo(cx,cy+radius-5); ctx.lineTo(cx-7,cy-4); ctx.lineTo(cx+7,cy-4); ctx.closePath(); ctx.fill();
+      ctx.font='bold 13px Consolas'; ctx.fillStyle='#ff0000'; ctx.fillText('N',cx,cy-radius-10);
+      ctx.font='bold 11px Consolas'; ctx.fillStyle='#ffffff'; ctx.fillText('E',cx+radius+10,cy); ctx.fillText('S',cx,cy+radius+10); ctx.fillText('W',cx-radius-10,cy);
+      ctx.restore();
+    }
+
+    window.addEventListener('resize', drawTrackMap);
+    function setMapMode(mode) {
+      mapMode = mode === 'auto' ? 'auto' : 'start';
+      localStorage.setItem('djy_map_mode', mapMode);
+      document.querySelectorAll('[data-map-mode]').forEach(button => button.classList.toggle('selected', button.dataset.mapMode === mapMode));
+      drawTrackMap();
+    }
+
+    function clearMapTrails() {
+      trails.A.length = 0;
+      trails.B.length = 0;
+      drawTrackMap();
+    }
+
+    document.querySelectorAll('[data-map-mode]').forEach(button => button.onclick = () => setMapMode(button.dataset.mapMode));
+    document.querySelector('[data-map-clear]').onclick = clearMapTrails;
+    setMapMode(mapMode);
+    const markerSizeInput = document.getElementById('start-marker-size');
+    const markerSizeOutput = document.getElementById('start-marker-output');
+    markerSizeInput.value = startMarkerPx;
+    markerSizeOutput.value = `${startMarkerPx}px`;
+    markerSizeInput.addEventListener('input', () => {
+      startMarkerPx = Number(markerSizeInput.value);
+      markerSizeOutput.value = `${startMarkerPx}px`;
+      localStorage.setItem('djy_start_marker_px', String(startMarkerPx));
+      drawTrackMap();
+    });
+
+    function paintCurrentLaps() {
+      for (const vehicleId of ['A', 'B']) {
+        const anchor = anchors[vehicleId];
+        const seconds = anchor ? anchor.seconds + (anchor.live ? (performance.now() - anchor.at) / 1000 : 0) : null;
+        field(vehicleId, 'current').textContent = formatLap(seconds);
+      }
+    }
+
+    async function post(url, body) {
+      const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+
+    document.querySelectorAll('[data-gate-vehicle]').forEach(button => {
+      button.onclick = async () => {
+        const vehicleId = button.dataset.gateVehicle;
+        const vehicle = latestVehicles[vehicleId];
+        if (vehicle && !vehicle.gps_ready && !confirm(`차량 ${vehicleId} GPS가 아직 안정되지 않았습니다. 정확도 15m 이하가 15초 유지된 뒤 설정하는 것을 권장합니다. 그래도 설정할까요?`)) return;
+        const status = document.getElementById('command-status');
+        status.className = '';
+        status.textContent = `차량 ${vehicleId} 위치로 출발선을 설정하는 중...`;
+        try {
+          const data = await post('/api/lap/gate', {vehicle_id:vehicleId, half_width_m:Number(document.getElementById('gate-width').value), min_lap_s:Number(document.getElementById('min-lap').value)});
+          clearMapTrails();
+          setMapMode('start');
+          render(data);
+          status.textContent = `차량 ${vehicleId}의 현재 위치와 진행 방향으로 출발선을 설정했습니다.`;
+        } catch (error) {
+          status.className = 'error';
+          status.textContent = error.message;
+        }
+      };
+    });
+
+    document.getElementById('reset-timing').onclick = async () => {
+      if (!confirm('차량 A/B의 현재 랩 카운터를 초기화하고 새 측정을 시작할까요? 저장된 완료 랩은 삭제되지 않습니다.')) return;
+      const data = await post('/api/lap/reset', {});
+      previousLapCounts.A = 0;
+      previousLapCounts.B = 0;
+      render(data);
+      document.getElementById('command-status').textContent = '새 측정을 시작했습니다. 각 차량은 다음 출발선 통과부터 랩이 시작됩니다.';
+    };
+
+    document.querySelectorAll('[data-pit-target]').forEach(button => button.onclick = () => setPitTarget(button.dataset.pitTarget));
+    document.querySelectorAll('[data-pit-command]').forEach(button => button.onclick = () => sendPitCommand(button.dataset.pitCommand));
+
+    async function tick() {
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch('/api/lap/status', {cache:'no-store'});
+        render(await response.json());
+      } catch (error) {
+        const status = document.getElementById('command-status');
+        status.className = 'error';
+        status.textContent = `SERVER OFFLINE · ${error.message}`;
+      } finally {
+        loading = false;
+      }
+    }
+
+    setInterval(paintCurrentLaps, 100);
+    setInterval(tick, 500);
+    setInterval(refreshPitCommands, 1000);
+    refreshPitCommands();
+    tick();
+  </script>
+</body>
+</html>

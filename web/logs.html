@@ -18,10 +18,28 @@
     .session-name { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 650; white-space: nowrap; }
     .session-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font: 10px Consolas, monospace; }
     .live { color: var(--red); }
-    .detail { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto minmax(190px, 35vh) minmax(180px, 1fr); gap: 10px; padding: 14px; }
+    .detail { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(190px, 35vh) minmax(180px, 1fr); gap: 10px; padding: 14px; }
     .run-head { min-width: 0; display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 2px 2px 8px; }
     .run-head h2 { overflow: hidden; margin: 0; font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
     .run-head p { margin: 5px 0 0; color: var(--muted); font: 11px Consolas, monospace; }
+    .run-actions { display: flex; align-items: center; gap: 9px; }
+    .vehicle-tabs { display: flex; gap: 5px; }
+    .vehicle-tab { min-width: 74px; height: 31px; padding: 0 10px; border: 1px solid var(--line); background: #050505; color: var(--muted); font: 800 10px Consolas, monospace; cursor: pointer; }
+    .vehicle-tab.selected { border-color: var(--green); color: var(--green); background: #0a140f; }
+    .vehicle-tab[data-vehicle="B"].selected { border-color: var(--blue); color: var(--blue); background: #07131b; }
+    .track-link { padding: 8px 10px; border: 1px solid var(--blue); color: var(--blue); font: 800 10px Consolas, monospace; text-decoration: none; white-space: nowrap; }
+    .track-link[hidden] { display: none; }
+    .lap-panel { min-width: 0; border: 1px solid var(--line); background: #020202; overflow: auto; }
+    .lap-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px Consolas, monospace; }
+    .lap-panel-head b { color: #ddd; }
+    .lap-table { width: 100%; min-width: 630px; border-collapse: collapse; }
+    .lap-table th, .lap-table td { padding: 7px 9px; border-bottom: 1px solid #171717; text-align: right; font: 10px Consolas, monospace; white-space: nowrap; }
+    .lap-table th:first-child, .lap-table td:first-child { text-align: left; }
+    .lap-table th { color: var(--muted); font-weight: 400; }
+    .lap-table td { color: #ccc; }
+    .lap-table .lap-number { color: var(--amber); font-weight: 800; }
+    .lap-track { color: var(--blue); text-decoration: none; }
+    .lap-track:hover { text-decoration: underline; }
     .chart-panel { min-height: 0; position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); background: #020202; }
     .chart-head { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px Consolas, monospace; }
     .trace-controls, .series-toggles, .zoom-controls { display: flex; align-items: center; gap: 5px; }
@@ -38,12 +56,15 @@
     .chart-tooltip[hidden] { display: none; }
     .tooltip-time { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: #aaa; }
     .tooltip-row { display: flex; justify-content: space-between; gap: 18px; }
+    .sample-details { min-width: 220px; color: #aaa; font: 10px/1.5 Consolas, monospace; }
+    .sample-details summary { color: var(--blue); cursor: pointer; }
+    .sample-details pre { margin: 7px 0 0; color: #bbb; white-space: pre-wrap; }
     .empty { padding: 24px 14px; color: var(--muted); font: 12px Consolas, monospace; }
     @media (max-width: 800px) {
       body { height: auto; overflow: auto; }
       .logs-layout { height: auto; display: block; }
       .session-panel { max-height: 290px; border-right: 0; border-bottom: 1px solid var(--line-strong); }
-      .detail { grid-template-rows: auto auto 260px 420px; padding: 10px; }
+      .detail { grid-template-rows: auto auto auto 260px 420px; padding: 10px; }
       .run-head { align-items: flex-start; flex-direction: column; }
       .chart-head { align-items: flex-start; flex-direction: column; }
       .trace-controls { justify-content: flex-start; }
@@ -53,7 +74,7 @@
 <body>
   <header class="topbar">
     <div class="brand"><h1>대자연 DJY · RUN ARCHIVE</h1><small>BAJA TELEMETRY / SESSION REVIEW</small></div>
-    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/dashboard">PIT WALL</a></nav>
+    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/dashboard">PIT WALL</a><a href="/timing">TIMING</a></nav>
   </header>
   <main class="logs-layout">
     <aside class="session-panel">
@@ -63,7 +84,7 @@
     <section class="detail">
       <div class="run-head">
         <div><h2 id="run-name">세션을 선택하세요</h2><p id="run-meta">왼쪽 목록에서 주행 기록 선택</p></div>
-        <div id="load-state" class="mono muted">STANDBY</div>
+        <div class="run-actions"><div class="vehicle-tabs" role="tablist" aria-label="기록 차량 선택"><button class="vehicle-tab selected" type="button" data-vehicle="A" role="tab">VEHICLE A</button><button class="vehicle-tab" type="button" data-vehicle="B" role="tab">VEHICLE B</button></div><a id="track-link" class="track-link" target="_blank" rel="noopener" hidden>TRACK MAP ↗</a><div id="load-state" class="mono muted">STANDBY</div></div>
       </div>
       <div class="metric-strip">
         <div class="metric"><div class="metric-label">Samples</div><div class="metric-value" id="samples">--</div></div>
@@ -71,6 +92,10 @@
         <div class="metric"><div class="metric-label">Max RPM</div><div class="metric-value signal-green" id="maxrpm">--</div></div>
         <div class="metric"><div class="metric-label">Max Speed</div><div class="metric-value signal-blue" id="maxspeed">--<span class="metric-unit">km/h</span></div></div>
         <div class="metric"><div class="metric-label">Avg Fuel Add</div><div class="metric-value signal-red" id="avgfuel">--</div></div>
+      </div>
+      <div class="lap-panel">
+        <div class="lap-panel-head"><b id="lap-title">VEHICLE A LAP RECORD</b><span id="lap-count">0 LAPS</span></div>
+        <table class="lap-table"><thead><tr><th>Lap</th><th>Lap Time</th><th>Distance</th><th>Max Speed</th><th>Avg Speed</th><th>GPS Points</th><th>Route</th></tr></thead><tbody id="laps"><tr><td colspan="7" class="muted">NO LAP DATA</td></tr></tbody></table>
       </div>
       <div class="chart-panel">
         <div class="chart-head">
@@ -93,9 +118,9 @@
         <div class="chart-tooltip" id="chart-tooltip" hidden></div>
       </div>
       <div class="data-table-wrap">
-        <table>
-          <thead><tr><th>Elapsed</th><th>RPM</th><th>Speed km/h</th><th>Throttle %</th><th>Fuel Add</th><th>GPS Age</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="6" class="muted">NO DATA</td></tr></tbody>
+          <table>
+          <thead><tr><th>Elapsed</th><th>RPM</th><th>Speed km/h</th><th>Throttle %</th><th>Fuel Add</th><th>GPS Age</th><th id="detail-heading">GPS A / IMU / ECU</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="7" class="muted">NO DATA</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -105,6 +130,7 @@
     let sessions = [];
     let selectedId = null;
     let selectedSession = null;
+    let selectedVehicle = 'A';
     let currentRows = [];
     let loadedSignature = '';
     let displayedSessionId = null;
@@ -114,6 +140,16 @@
     let hoverIndex = null;
     let dragging = false;
     let dragX = 0;
+
+    function lapTimeText(seconds) {
+      if (seconds == null) return '--:--.---';
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}:${(seconds % 60).toFixed(3).padStart(6, '0')}`;
+    }
+
+    function numberText(value, digits = 1, suffix = '') {
+      return value == null ? '--' : `${Number(value).toFixed(digits)}${suffix}`;
+    }
 
     function dateText(ts) {
       return new Date(ts * 1000).toLocaleString('ko-KR', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'});
@@ -171,7 +207,7 @@
         selectedSession = sessions.find(s => s.id === selectedId) || null;
         renderSessions();
         const signature = selectedSession
-          ? `${selectedSession.id}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`
+          ? `${selectedSession.id}:${selectedVehicle}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`
           : '';
         if (selectedSession && signature !== loadedSignature) await loadRun();
       } catch (error) {
@@ -191,7 +227,8 @@
     async function loadRun() {
       if (!selectedSession) return;
       $('load-state').textContent = 'LOADING';
-      const data = await fetch(`/api/logs?session_id=${selectedId}&limit=10000`, {cache:'no-store'}).then(r => r.json());
+      const data = await fetch(`/api/logs?session_id=${selectedId}&vehicle_id=${selectedVehicle}&limit=10000`, {cache:'no-store'}).then(r => r.json());
+      const lapData = await fetch(`/api/laps?session_id=${selectedId}&vehicle_id=${selectedVehicle}`, {cache:'no-store'}).then(r => r.json());
       const summary = data.summary;
       currentRows = data.rows.slice().reverse();
       runFirstTs = summary.first_ts;
@@ -199,16 +236,41 @@
       displayedSessionId = selectedId;
       $('run-name').textContent = `#${selectedSession.id}  ${selectedSession.name}`;
       $('run-meta').textContent = `${dateText(selectedSession.start_ts)} · ${selectedSession.end_ts == null ? 'RECORDING NOW' : 'RUN COMPLETE'}`;
+      $('detail-heading').textContent = `GPS ${selectedVehicle} / IMU / ECU`;
+      $('track-link').href = `/map?session=${selectedSession.id}&vehicle_id=${selectedVehicle}`;
+      $('track-link').hidden = false;
       $('samples').textContent = summary.samples;
       const duration = durationParts(selectedSession.start_ts, selectedSession.end_ts);
       $('duration').innerHTML = `${duration.value}<span class="metric-unit">${duration.unit}</span>`;
       $('maxrpm').textContent = summary.max_rpm ?? '--';
       $('maxspeed').innerHTML = `${summary.max_speed == null ? '--' : summary.max_speed.toFixed(1)}<span class="metric-unit">km/h</span>`;
       $('avgfuel').textContent = summary.avg_fuel == null ? '--' : `${summary.avg_fuel >= 0 ? '+' : ''}${summary.avg_fuel.toFixed(1)}`;
+      document.querySelector('#toggle-rpm').closest('label').hidden = selectedVehicle !== 'A';
+      document.querySelector('#toggle-fuel').closest('label').hidden = selectedVehicle !== 'A';
+      renderLaps(lapData.laps || []);
       renderRows(data.rows, summary.first_ts);
       drawTrace();
-      loadedSignature = `${selectedSession.id}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`;
+      loadedSignature = `${selectedSession.id}:${selectedVehicle}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`;
       $('load-state').textContent = selectedSession.end_ts == null ? '● LIVE SESSION' : 'SESSION LOADED';
+    }
+
+    function renderLaps(laps) {
+      $('lap-title').textContent = `VEHICLE ${selectedVehicle} LAP RECORD`;
+      $('lap-count').textContent = `${laps.filter(lap => lap.lap_number > 0).length} LAPS`;
+      const body = $('laps');
+      body.replaceChildren();
+      if (!laps.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="7" class="muted">NO GPS LAP DATA FOR THIS VEHICLE</td>';
+        body.append(row);
+        return;
+      }
+      laps.forEach(lap => {
+        const row = document.createElement('tr');
+        const label = lap.lap_number === 0 ? 'BEFORE START' : `LAP ${lap.lap_number}`;
+        row.innerHTML = `<td class="lap-number">${label}</td><td>${lapTimeText(lap.lap_time_s)}</td><td>${numberText(lap.distance_m / 1000, 2, ' km')}</td><td>${numberText(lap.max_speed_kmh, 1, ' km/h')}</td><td>${numberText(lap.avg_speed_kmh, 1, ' km/h')}</td><td>${lap.points}</td><td><a class="lap-track" target="_blank" rel="noopener" href="/map?session=${selectedId}&vehicle_id=${selectedVehicle}&lap_number=${lap.lap_number}">MAP ↗</a></td>`;
+        body.append(row);
+      });
     }
 
     function renderRows(rows, firstTs) {
@@ -217,7 +279,7 @@
       if (!rows.length) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 6;
+        td.colSpan = 7;
         td.className = 'muted';
         td.textContent = 'NO SAMPLES IN THIS SESSION';
         tr.append(td); body.append(tr); return;
@@ -225,14 +287,30 @@
       rows.forEach(row => {
         const values = [
           `+${(row.ts - firstTs).toFixed(1)}s`,
-          row.rpm,
-          row.speed_kmh == null ? '--' : row.speed_kmh.toFixed(1),
-          row.throttle_percent,
-          `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}`,
-          row.gps_age == null ? '--' : `${row.gps_age.toFixed(1)}s`
+          selectedVehicle === 'A' ? row.rpm : '--',
+          row.vehicle_speed_kmh == null ? '--' : row.vehicle_speed_kmh.toFixed(1),
+          selectedVehicle === 'A' ? row.throttle_percent : '--',
+          selectedVehicle === 'A' ? `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}` : '--',
+          row.vehicle_gps_age == null ? '--' : `${row.vehicle_gps_age.toFixed(1)}s`
         ];
         const tr = document.createElement('tr');
         values.forEach(value => { const td = document.createElement('td'); td.textContent = value; tr.append(td); });
+        const detailCell = document.createElement('td');
+        const details = document.createElement('details');
+        details.className = 'sample-details';
+        const summary = document.createElement('summary');
+        summary.textContent = '전체 수신값 보기';
+        const pre = document.createElement('pre');
+        const valueText = (value, digits = 3) => value == null ? '--' : (typeof value === 'number' ? value.toFixed(digits) : String(value));
+        const timeText = value => value == null ? '--' : new Date(value * 1000).toISOString();
+        pre.textContent = [
+          `GPS ${selectedVehicle}  ts=${timeText(row.vehicle_gps_ts)} speed=${valueText(row.vehicle_speed_kmh, 2)} lat=${valueText(row.vehicle_gps_lat, 7)} lon=${valueText(row.vehicle_gps_lon, 7)} acc=${valueText(row.vehicle_gps_accuracy_m, 2)}m heading=${valueText(row.vehicle_gps_heading, 1)}° alt=${valueText(row.vehicle_gps_altitude, 2)}m age=${valueText(row.vehicle_gps_age, 2)}s`,
+          selectedVehicle === 'A' ? `IMU    ts=${timeText(row.motion_ts)} x=${valueText(row.accel_x_g, 4)}g y=${valueText(row.accel_y_g, 4)}g z=${valueText(row.accel_z_g, 4)}g total=${valueText(row.total_g, 4)}g age=${valueText(row.motion_age, 2)}` : 'IMU    차량 A 기록에 연결된 공통 센서값',
+          selectedVehicle === 'A' ? `ECU    ts=${timeText(row.usb_ts)} raw=${row.raw_hex || '--'}` : 'ECU    차량 B 별도 ECU 기록 없음',
+        ].join('\n');
+        details.append(summary, pre);
+        detailCell.append(details);
+        tr.append(detailCell);
         body.append(tr);
       });
     }
@@ -297,11 +375,11 @@
       const tooltip = $('chart-tooltip');
       const panel = document.querySelector('.chart-panel');
       const elapsed = runFirstTs == null ? 0 : row.ts - runFirstTs;
-      const speed = row.speed_kmh == null ? '--' : `${row.speed_kmh.toFixed(1)} km/h`;
-      const fuel = `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}`;
+      const speed = row.vehicle_speed_kmh == null ? '--' : `${row.vehicle_speed_kmh.toFixed(1)} km/h`;
+      const fuel = selectedVehicle === 'A' ? `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}` : '--';
       tooltip.innerHTML = `
         <div class="tooltip-time">+${elapsed.toFixed(1)}s · ${new Date(row.ts * 1000).toLocaleTimeString('ko-KR')}</div>
-        <div class="tooltip-row"><span class="signal-green">RPM</span><b>${row.rpm}</b></div>
+        <div class="tooltip-row"><span class="signal-green">RPM</span><b>${selectedVehicle === 'A' ? row.rpm : '--'}</b></div>
         <div class="tooltip-row"><span class="signal-blue">SPEED</span><b>${speed}</b></div>
         <div class="tooltip-row"><span class="signal-amber">THROTTLE</span><b>${row.throttle_percent}%</b></div>
         <div class="tooltip-row"><span class="signal-red">FUEL ADD</span><b>${fuel}</b></div>`;
@@ -345,7 +423,7 @@
       let maxRpmValue = 0, maxSpeedValue = 0, minFuel = 0, maxFuel = 0;
       visible.forEach(row => {
         maxRpmValue = Math.max(maxRpmValue, row.rpm);
-        if (row.speed_kmh != null) maxSpeedValue = Math.max(maxSpeedValue, row.speed_kmh);
+        if (row.vehicle_speed_kmh != null) maxSpeedValue = Math.max(maxSpeedValue, row.vehicle_speed_kmh);
         minFuel = Math.min(minFuel, row.fuel_add);
         maxFuel = Math.max(maxFuel, row.fuel_add);
       });
@@ -377,9 +455,9 @@
         });
         ctx.stroke();
       };
-      if ($('toggle-rpm').checked) plot('#25e58d', row => row.rpm, 0, maxRpm);
-      if ($('toggle-speed').checked) plot('#37b9ff', row => row.speed_kmh, 0, maxSpeed);
-      if ($('toggle-fuel').checked) plot('#ff4d5e', row => row.fuel_add, minFuel, maxFuel);
+      if ($('toggle-rpm').checked && selectedVehicle === 'A') plot('#25e58d', row => row.rpm, 0, maxRpm);
+      if ($('toggle-speed').checked) plot('#37b9ff', row => row.vehicle_speed_kmh, 0, maxSpeed);
+      if ($('toggle-fuel').checked && selectedVehicle === 'A') plot('#ff4d5e', row => row.fuel_add, minFuel, maxFuel);
       ctx.fillStyle = '#777';
       const startElapsed = runFirstTs == null ? 0 : firstTime - runFirstTs;
       const endElapsed = runFirstTs == null ? timeSpan : lastTime - runFirstTs;
@@ -394,6 +472,17 @@
     }
 
     ['toggle-rpm', 'toggle-speed', 'toggle-fuel'].forEach(id => $(id).addEventListener('change', drawTrace));
+    document.querySelectorAll('[data-vehicle]').forEach(button => button.onclick = async () => {
+      if (selectedVehicle === button.dataset.vehicle) return;
+      selectedVehicle = button.dataset.vehicle;
+      document.querySelectorAll('[data-vehicle]').forEach(item => {
+        const selected = item.dataset.vehicle === selectedVehicle;
+        item.classList.toggle('selected', selected);
+        item.setAttribute('aria-selected', selected ? 'true' : 'false');
+      });
+      loadedSignature = '';
+      await loadRun();
+    });
     $('zoom-in').onclick = () => zoomTrace(.6);
     $('zoom-out').onclick = () => zoomTrace(1.65);
     $('zoom-reset').onclick = () => { resetZoom(); drawTrace(); };

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DJY Vehicle Link</title>
   <link rel="stylesheet" href="/djy.css">
+  <style>html.embed-mode body > .topbar { display: none !important; }</style>
   <style>
     .record-control { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: end; gap: 10px; padding: 18px 22px; border-bottom: 1px solid var(--line-strong); }
     label { display: block; margin-bottom: 7px; color: var(--muted); font: 10px Consolas, monospace; }
@@ -24,11 +25,12 @@
     @media (max-width: 850px) { .channels { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 600px) { .record-control { grid-template-columns: 1fr 1fr; } .field { grid-column: 1 / 3; } .channels { grid-template-columns: 1fr; } .channel { min-height: 160px; } }
   </style>
+  <script>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed-mode');</script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><h1>대자연 DJY · VEHICLE LINK</h1><small>ECU ACQUISITION / RUN CONTROL</small></div>
-    <nav class="nav"><a href="/">HOME</a><a href="/dashboard">PIT WALL</a><a href="/logs">ARCHIVE</a></nav>
+    <nav class="nav"><a href="/">HOME</a><a href="/dashboard">PIT WALL</a><a href="/logs">ARCHIVE</a><a href="/timing">TIMING</a></nav>
   </header>
   <main>
     <section class="record-control">

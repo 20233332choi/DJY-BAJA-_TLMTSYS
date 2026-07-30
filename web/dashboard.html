@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DJY Baja Pit Wall</title>
   <link rel="stylesheet" href="/djy.css">
+  <style>html.embed-mode body > .topbar { display: none !important; }</style>
   <style>
     body { height: 100vh; overflow: hidden; }
     #status { color: var(--muted); font: 11px Consolas, monospace; white-space: nowrap; }
     #status.recording { color: var(--red); }
     .wall { height: calc(100vh - 64px); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0,1fr) minmax(0,1fr) 104px; background: var(--line-strong); gap: 1px; }
+    html.embed-mode .wall { height: 100vh; }
     .channel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto 1fr auto; padding: 18px 22px; background: #000; }
     .channel-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font: 12px Consolas, monospace; }
     .channel-head span:first-child { font-weight: 700; color: #d8d8d8; }
@@ -49,11 +51,12 @@
       .motion-cell { min-height: 72px; }
     }
   </style>
+  <script>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed-mode');</script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><h1>대자연 DJY · PIT WALL</h1><small>BAJA LIVE TELEMETRY</small></div>
-    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/logs">ARCHIVE</a><span id="status">CONNECTING</span></nav>
+    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/logs">ARCHIVE</a><a href="/timing">TIMING</a><span id="status">CONNECTING</span></nav>
   </header>
   <main class="wall">
     <section class="channel rpm"><div class="channel-head"><span>01 · ENGINE SPEED</span><span>ECU</span></div><div class="live-value" id="rpm">----</div><div class="unit">RPM</div></section>

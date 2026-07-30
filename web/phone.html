@@ -8,6 +8,9 @@
   <style>
     main { max-width: 600px; margin: 0 auto; padding: 24px 18px; }
     .instructions { margin: 0 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .vehicle-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .vehicle-select { height: 54px; border: 2px solid var(--line-strong); background: #020202; color: #777; font: 900 17px Consolas, monospace; cursor: pointer; }
+    .vehicle-select.selected { border-color: var(--green); color: var(--green); background: #031008; }
     #start { width: 100%; height: 52px; border: 1px solid var(--blue); border-radius: 0; background: #020202; color: var(--blue); font-size: 17px; font-weight: 800; cursor: pointer; }
     #start.active { border-color: var(--red); color: var(--red); }
     .speed-block { margin-top: 18px; padding: 24px 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); text-align: center; }
@@ -29,6 +32,7 @@
   </header>
   <main>
     <p class="instructions">아이폰에서는 HTTPS 주소로 접속해야 GPS와 모션 권한을 사용할 수 있습니다. 휴대폰을 차량에 단단히 고정한 뒤 시작하세요.</p>
+    <section class="vehicle-picker"><button class="vehicle-select" data-vehicle="A">차량 A</button><button class="vehicle-select" data-vehicle="B">차량 B</button></section>
     <button id="start">GPS + IMU 전송 시작</button>
     <section class="speed-block"><div class="speed-label">VEHICLE SPEED</div><div class="speed" id="speed">--.-</div><div class="unit">km/h</div></section>
     <section class="motion-grid">
@@ -46,6 +50,22 @@
     let watchId = null;
     let running = false;
     let lastMotionSent = 0;
+    const requestedVehicle = new URLSearchParams(location.search).get('vehicle');
+    let vehicleId = ['A', 'B'].includes(requestedVehicle) ? requestedVehicle : (localStorage.getItem('djy_lap_vehicle_id') || 'A');
+
+    function selectVehicle(next) {
+      if (running) {
+        statusEl.textContent = '전송을 중지한 뒤 차량을 변경하세요.';
+        return;
+      }
+      vehicleId = next;
+      localStorage.setItem('djy_lap_vehicle_id', vehicleId);
+      document.querySelectorAll('.vehicle-select').forEach(button => button.classList.toggle('selected', button.dataset.vehicle === vehicleId));
+      statusEl.textContent = `VEHICLE ${vehicleId} / GPS STANDBY`;
+    }
+
+    document.querySelectorAll('.vehicle-select').forEach(button => button.onclick = () => selectVehicle(button.dataset.vehicle));
+    selectVehicle(vehicleId);
 
     function numberOrNull(value) {
       return Number.isFinite(value) ? value : null;
@@ -58,7 +78,7 @@
       window.removeEventListener('devicemotion', onMotion);
       startButton.textContent = 'GPS + IMU 전송 시작';
       startButton.classList.remove('active');
-      statusEl.textContent = 'GPS / IMU STANDBY';
+      statusEl.textContent = `VEHICLE ${vehicleId} / GPS STANDBY`;
     }
 
     function onMotion(event) {
@@ -69,6 +89,7 @@
       const gy = numberOrNull(gravity.y);
       const gz = numberOrNull(gravity.z);
       const payload = {
+        vehicle_id: vehicleId,
         ts: Date.now() / 1000,
         accel_x_g: numberOrNull(linear.x) == null ? null : linear.x / divisor,
         accel_y_g: numberOrNull(linear.y) == null ? null : linear.y / divisor,
@@ -101,15 +122,23 @@
       }
       running = true;
       if (motionReady) window.addEventListener('devicemotion', onMotion);
-      startButton.textContent = 'GPS + IMU 전송 중지';
+      startButton.textContent = `차량 ${vehicleId} GPS + IMU 전송 중지`;
       startButton.classList.add('active');
       statusEl.textContent = motionReady ? 'WAITING FOR GPS / IMU' : 'WAITING FOR GPS\nIMU PERMISSION DENIED OR UNSUPPORTED';
       watchId = navigator.geolocation.watchPosition(position => {
         const c = position.coords;
-        const payload = {ts:Date.now()/1000, lat:c.latitude, lon:c.longitude, accuracy_m:c.accuracy, speed_kmh:c.speed == null ? null : c.speed * 3.6, heading:c.heading, altitude:c.altitude};
+        const payload = {vehicle_id:vehicleId, ts:Date.now()/1000, lat:c.latitude, lon:c.longitude, accuracy_m:c.accuracy, speed_kmh:c.speed == null ? null : c.speed * 3.6, heading:c.heading, altitude:c.altitude};
         speedEl.textContent = payload.speed_kmh == null ? '--.-' : payload.speed_kmh.toFixed(1);
-        statusEl.textContent = `GPS LIVE / IMU ${motionReady ? 'ON' : 'OFF'}\nACCURACY  ${payload.accuracy_m.toFixed(1)} m\nLAT       ${payload.lat.toFixed(6)}\nLON       ${payload.lon.toFixed(6)}`;
+        statusEl.textContent = `VEHICLE ${vehicleId} / GPS LIVE / IMU ${motionReady ? 'ON' : 'OFF'}\nACCURACY  ${payload.accuracy_m.toFixed(1)} m\nLAT       ${payload.lat.toFixed(6)}\nLON       ${payload.lon.toFixed(6)}`;
         fetch('/gps', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), keepalive:true})
+          .then(response => response.json())
+          .then(result => {
+            if (!result.vehicle) return;
+            const lap = result.vehicle;
+            const formatLap = seconds => seconds == null ? '--:--.---' : `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(3).padStart(6, '0')}`;
+            const readyText = lap.gps_ready ? 'READY' : `${Math.min(15, Math.floor(lap.gps_stable_s || 0))}/15 s`;
+            statusEl.textContent += `\nGPS READY ${readyText}\nFILTER    ${lap.position_locked ? 'STILL LOCK' : `TRACK / ${lap.rejected_samples || 0} DROP`}\nLAPS      ${lap.lap_count}\nLAST      ${formatLap(lap.last_lap_s)}\nTIMING    ${lap.timing_status}`;
+          })
           .catch(error => statusEl.textContent = `SEND ERROR\n${error}`);
       }, error => statusEl.textContent = `GPS ERROR\n${error.message}`, {enableHighAccuracy:true, maximumAge:0, timeout:10000});
     };
