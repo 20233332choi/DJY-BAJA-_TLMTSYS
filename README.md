@@ -1,145 +1,103 @@
-# 대자연 DJY Baja Pit Wall
+# DJY Baja Telemetry System
 
-대자연 DJY Baja 차량용 피트월 대시보드입니다. Rapid Bike EVO USB와 iPhone GPS를 함께 받아 표시하고 저장합니다.
+DJY Baja 차량의 Rapid Bike ECU 데이터, iPhone GPS/IMU, 랩타이밍을 한곳에서 수집하고 표시하는 텔레메트리 프로젝트입니다. ESP32-S3 펌웨어와 Windows 피트월 소프트웨어를 서로 독립적으로 관리할 수 있도록 분리했습니다.
 
-## 새 컴퓨터 설치 요구사항
-
-### 필수 환경
-
-- Windows 10/11 64비트
-- Rapid Bike EVO와 `USB Bike Adaptor`
-- Python 3.10 이상 64비트
-- Edge, Chrome 등 최신 웹 브라우저
-
-Python 설치 시 `Add python.exe to PATH`를 선택해야 `run_app.bat`으로 실행할 수 있습니다. 설치 후 PowerShell에서 다음 명령으로 확인합니다.
-
-```powershell
-python --version
-python -c "import struct; print(struct.calcsize('P') * 8)"
-```
-
-두 번째 명령의 결과가 `64`여야 합니다. 외부 Python 패키지는 사용하지 않으므로 `pip install`은 필요하지 않습니다.
-
-### Rapid Bike USB 드라이버
-
-Rapid Bike Master 또는 Dimsport USB 드라이버를 먼저 설치해야 합니다. 현재 프로그램은 다음 64비트 D2XX DLL을 사용합니다.
+## 프로젝트 구성
 
 ```text
-C:\Program Files\DimSport\Driver DimSport\DSDEVICE64.dll
+DJY-BAJA-_TLMTSYS/
+├─ firmware/
+│  └─ esp32-s3-rapidbike/
+│     ├─ micropython/             # 현재 보드에서 사용하는 운영 펌웨어
+│     ├─ arduino-uart-bridge/     # 최소 유선 브리지 대안
+│     └─ docs/                    # 펌웨어 실험 기록
+├─ software/
+│  ├─ pit-wall/                   # Python 서버와 웹 대시보드
+│  ├─ rbmaster-bridge/            # RB Master 연동 실험용 C 소스
+│  └─ rbmaster-tools/             # 진단 스크립트
+├─ docs/
+│  ├─ hardware/                   # 배선 매뉴얼과 Espressif PDF
+│  └─ images/                     # 핀맵 및 진단 화면
+└─ .local/                        # 제조사 프로그램·DLL 등 로컬 전용 파일(Git 제외)
 ```
 
-설치 여부는 PowerShell에서 확인할 수 있습니다.
+## 빠른 시작
+
+### 1. 피트월 소프트웨어
+
+Windows PowerShell 또는 명령 프롬프트에서 다음을 실행합니다.
 
 ```powershell
-Test-Path "C:\Program Files\DimSport\Driver DimSport\DSDEVICE64.dll"
-```
-
-결과가 `True`여야 합니다. Rapid Bike Master는 USB를 동시에 사용할 수 없으며, 이 프로그램을 실행하면 `RBMASTERPRO.EXE`를 자동으로 종료합니다.
-
-### iPhone GPS와 IMU 사용 시
-
-휴대폰 GPS와 가속도 센서는 HTTPS에서만 사용할 수 있으므로 다음 항목이 추가로 필요합니다.
-
-- 인터넷 연결
-- ngrok 계정과 인증 토큰
-- Windows용 ngrok Agent가 PATH에 등록된 상태
-- iPhone Safari
-
-ngrok 설치 후 처음 한 번 인증 토큰을 등록합니다.
-
-```powershell
-ngrok config add-authtoken "발급받은_토큰"
-ngrok help
-```
-
-토큰은 저장소나 설정 파일에 커밋하지 마세요.
-
-## 처음 실행
-
-1. 프로젝트 폴더 전체를 새 컴퓨터로 옮기거나 GitHub에서 복제합니다.
-2. Rapid Bike USB를 연결합니다.
-3. `run_app.bat`을 실행합니다.
-4. Windows 방화벽 창이 뜨면 개인 네트워크 접근을 허용합니다.
-5. PC 브라우저에서 `http://127.0.0.1:8765/`을 엽니다.
-6. 휴대폰을 사용한다면 `start_gps_https.bat`을 실행하고 표시된 `https://.../phone` 주소를 iPhone Safari에서 엽니다.
-7. `GPS + IMU 전송 시작`을 누르고 위치 및 동작·방향 권한을 허용합니다.
-
-정상 연결 시 대시보드 상태에 `USB live`가 표시됩니다. 프로그램을 두 번 실행하면 USB 또는 `8765` 포트가 충돌할 수 있으므로 한 번만 실행하세요.
-
-### 실행 오류 확인
-
-| 상태 | 확인할 내용 |
-|---|---|
-| `DSDEVICE64.dll not found` | Rapid Bike Master 또는 Dimsport 드라이버 설치 |
-| `USB ECU not found` | USB 케이블, 어댑터 전원, Windows 장치 인식 확인 |
-| `USB busy` | Rapid Bike Master와 중복 실행 여부 확인 |
-| 웹 페이지가 열리지 않음 | `app.py` 실행 여부와 8765 포트, 방화벽 확인 |
-| iPhone GPS/IMU 권한이 없음 | ngrok의 HTTPS `/phone` 주소로 접속했는지 확인 |
-
-## 표시 값
-
-```text
-RPM        Rapid Bike USB에서 읽은 엔진 회전수
-SPEED      iPhone GPS 속도, km/h
-THROTTLE   Rapid Bike 응답의 TPS 열 인덱스 기반 개도량
-FUEL ADD   INJ raw - 100, 현재 추가 연료 분사 보정값
-PHONE IMU  휴대폰 기준 X/Y/Z 선형 가속도와 중력 포함 TOTAL G
-```
-
-## 실행
-
-Rapid Bike Master는 자동으로 종료하고 USB를 직접 읽습니다.
-
-```powershell
-python .\app.py
-```
-
-또는:
-
-```powershell
+cd .\software\pit-wall
 .\run_app.bat
 ```
 
-PC 브라우저에서:
+브라우저에서 `http://127.0.0.1:8765/`을 엽니다. 자세한 설치, GPS/IMU, 랩타이밍, 데이터 저장 방법은 [피트월 소프트웨어 매뉴얼](software/pit-wall/README.md)을 참고하세요.
 
-```text
-http://127.0.0.1:8765/
-```
+### 2. ESP32-S3 펌웨어
 
-첫 화면 메뉴:
-
-```text
-1. 차량 to 서버
-2. 속도전송
-3. 실시간대쉬보드
-4. 주행기록 열람
-```
-
-## iPhone GPS
-
-GUI가 실행되면 GPS 수신 서버가 `8765` 포트로 열립니다.
-
-아이폰 Safari에서 HTTPS 주소로 접속해야 위치 권한이 정상 동작합니다. ngrok를 직접 실행하거나 아래 파일을 사용하세요.
+현재 보드에서 사용하는 운영 파일은 [MicroPython `main.py`](firmware/esp32-s3-rapidbike/micropython/main.py)입니다. 기본 MicroPython 이미지와 설치 도구도 함께 보관합니다.
 
 ```powershell
-.\start_gps_https.bat
+cd .\firmware\esp32-s3-rapidbike\micropython\tools
+.\install_wired_bridge.ps1 -Port COM8
 ```
 
-아이폰에서 표시된 `https://.../phone` 주소를 열고 `GPS + IMU 전송 시작`을 누르면 대시보드의 `SPEED`와 가속도 값이 갱신됩니다.
+전체 설치 및 복구 방법은 [ESP32-S3 펌웨어 매뉴얼](firmware/esp32-s3-rapidbike/README.md)을 참고하세요.
 
-아이폰은 버튼을 누를 때 GPS와 동작 및 방향 접근 권한을 모두 허용해야 합니다. 휴대폰 기준 X/Y/Z 축이므로 차량에 단단히 고정한 방향을 주행 중 바꾸지 마세요.
+## 하드웨어 매뉴얼
 
-## 저장
+사용 보드는 `ESP32-S3-DevKitC-1` 계열이며 Rapid Bike 통신은 3.3V TTL UART 기준입니다.
 
-`차량 to 서버` 화면에서 `주행 시작`을 누른 뒤부터 저장되고, `주행 종료`를 누르면 해당 세션이 닫힙니다.
-`주행기록 열람`에서는 왼쪽 세션을 선택해 해당 주행의 요약, RPM/속도 추이, 상세 샘플을 확인할 수 있습니다.
+| ESP32-S3 | 역할 | 연결 대상 |
+|---|---|---|
+| GPIO17 (`U1TXD`) | ECU 방향 송신 | Rapid Bike RX |
+| GPIO18 (`U1RXD`) | ECU 응답 수신 | Rapid Bike TX/Data |
+| GND | 신호 기준 | Rapid Bike GND |
+| USB-to-UART | PC 연결 및 전원 | Windows PC USB |
 
-```text
-data/djy_baja.sqlite3
-sessions
-samples
-```
+> **전기적 주의:** ESP32 GPIO에는 5V 또는 차량의 12V를 직접 연결하면 안 됩니다. Rapid Bike 측 신호가 3.3V TTL인지 확인하고, 보드는 USB 또는 검증된 레귤레이터로 전원 공급하세요. 차량과 ESP32 사이에는 반드시 공통 GND가 필요합니다.
 
-새 주행 샘플에는 `accel_x_g`, `accel_y_g`, `accel_z_g`, `total_g`, `motion_age`도 함께 저장됩니다.
+보드의 GPIO43/44는 PC USB-to-UART 통신에 사용하고 GPIO17/18은 Rapid Bike 통신에 사용합니다. Octal Flash/PSRAM 모델에서는 GPIO35~37이 내부 메모리에 사용될 수 있으므로 외부 배선에 사용하지 않습니다.
 
-이전 실험·캡처 자료와 실제 주행 DB는 로컬에만 보존되며 GitHub 업로드에서는 제외됩니다.
+- [상세 배선·LED·복구 매뉴얼](docs/hardware/README.md)
+- [ESP32-S3 DevKit 전체 PDF](docs/hardware/esp32-s3-devkitc-1-user-guide.pdf)
+- [ESP32-S3 핀 배치 이미지](docs/images/hardware/esp32_s3_pin_layout.png)
+
+## 기본 통신 설정
+
+| 항목 | 값 |
+|---|---|
+| UART 시작 속도 | 9600 baud, 8-N-1 |
+| UART 고속 전환 | 38400 baud |
+| ESP32 AP SSID | `RapidBike-ESP32` |
+| ESP32 AP 주소 | `192.168.4.1` |
+| TCP 데이터 포트 | `8888` |
+| UDP 검색 포트 | `8889` |
+| PC 대시보드 | `http://127.0.0.1:8765/` |
+
+AP 비밀번호는 펌웨어 소스에 정의되어 있습니다. 실제 운용 전에는 팀 전용 비밀번호로 변경하세요. 일반 공유기나 휴대폰 핫스팟 접속 정보는 `wifi_config.py`에 저장하며 Git에 포함하지 않습니다.
+
+## GitHub에 포함하지 않는 파일
+
+- 실제 주행 SQLite DB와 로그
+- Wi-Fi SSID/비밀번호가 들어 있는 `wifi_config.py`
+- PlatformIO 빌드 캐시와 Python 캐시
+- Rapid Bike Master 설치 파일, DLL, 패치 실행 파일
+- 패킷 캡처 및 임시 진단 결과
+
+제조사 프로그램은 `.local/rbmaster/`에 로컬 보관되며 저장소에는 올리지 않습니다. 이미 Git 기록에 들어간 제조사 바이너리가 있다면 단순 삭제 커밋만으로 과거 기록에서 사라지지는 않으므로, 공개 저장소 전환 전 별도의 이력 정리가 필요합니다.
+
+## 외부 문서 출처
+
+동봉한 ESP32-S3 PDF와 핀 이미지는 Espressif의 `esp-dev-kits` 문서에서 가져왔습니다.
+
+- 원문: <https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/>
+- 원본 저장소: <https://github.com/espressif/esp-dev-kits>
+- 문서 라이선스: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+
+PDF 파일은 내용 변경 없이 이름만 프로젝트 용도에 맞게 정리했습니다. Espressif 및 제품명은 각 권리자의 상표입니다.
+
+동봉한 ESP32-S3 MicroPython v1.28.0 Octal-SPIRAM 바이너리는
+[MicroPython 공식 다운로드](https://micropython.org/download/ESP32_GENERIC_S3/)에서
+제공되며 [MIT 라이선스](https://github.com/micropython/micropython/blob/master/LICENSE)를 따릅니다.
