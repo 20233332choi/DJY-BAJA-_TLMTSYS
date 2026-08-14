@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJY Vehicle Link</title>
+  <link rel="stylesheet" href="/djy.css">
+  <style>html.embed-mode body > .topbar { display: none !important; }</style>
+  <style>
+    .record-control { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: end; gap: 10px; padding: 18px 22px; border-bottom: 1px solid var(--line-strong); }
+    label { display: block; margin-bottom: 7px; color: var(--muted); font: 10px Consolas, monospace; }
+    input { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 0; outline: none; background: #050505; color: var(--text); }
+    input:focus { border-color: #777; }
+    .command { height: 44px; padding: 0 20px; border: 1px solid; border-radius: 0; background: #050505; font-weight: 750; cursor: pointer; }
+    #start { border-color: var(--green); color: var(--green); }
+    #stop { border-color: var(--red); color: var(--red); }
+    .command:disabled { border-color: #333 !important; color: #555 !important; cursor: default; }
+    #status { min-height: 35px; display: flex; align-items: center; margin: 0; padding: 0 22px; border-bottom: 1px solid var(--line); color: var(--muted); font: 11px Consolas, monospace; }
+    #status.recording { color: var(--red); }
+    .channels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--line-strong); gap: 1px; }
+    .channel { min-width: 0; min-height: 230px; display: flex; flex-direction: column; justify-content: space-between; padding: 18px; background: #000; }
+    .channel-label { color: var(--muted); font: 11px Consolas, monospace; }
+    .data-value { overflow: hidden; font-size: clamp(46px, 7vw, 96px); font-weight: 800; line-height: 1; text-align: center; white-space: nowrap; }
+    .channel-unit { color: #666; font: 10px Consolas, monospace; text-align: right; }
+    @media (max-width: 850px) { .channels { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .record-control { grid-template-columns: 1fr 1fr; } .field { grid-column: 1 / 3; } .channels { grid-template-columns: 1fr; } .channel { min-height: 160px; } }
+  </style>
+  <script>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed-mode');</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>대자연 DJY · VEHICLE LINK</h1><small>ECU ACQUISITION / RUN CONTROL</small></div>
+    <nav class="nav"><a href="/">HOME</a><a href="/dashboard">PIT WALL</a><a href="/logs">ARCHIVE</a><a href="/timing">TIMING</a></nav>
+  </header>
+  <main>
+    <section class="record-control">
+      <div class="field"><label for="name">SESSION NAME</label><input id="name" placeholder="예: 내구 주행 01"></div>
+      <button class="command" id="start">주행 시작</button>
+      <button class="command" id="stop">주행 종료</button>
+    </section>
+    <p id="status">CONNECTING</p>
+    <section class="channels">
+      <div class="channel"><div class="channel-label signal-green">01 · ENGINE</div><div class="data-value signal-green" id="rpm">----</div><div class="channel-unit">RPM</div></div>
+      <div class="channel"><div class="channel-label signal-blue">02 · SPEED</div><div class="data-value signal-blue" id="speed">--.-</div><div class="channel-unit">km/h</div></div>
+      <div class="channel"><div class="channel-label signal-amber">03 · THROTTLE</div><div class="data-value signal-amber" id="tps">--</div><div class="channel-unit">percent</div></div>
+      <div class="channel"><div class="channel-label signal-red">04 · ECU BATTERY</div><div class="data-value signal-red" id="battery">--.-</div><div class="channel-unit">volts</div></div>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    async function post(url, body = {}) {
+      const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      return response.json();
+    }
+    $('start').onclick = async () => { await post('/api/start', {name:$('name').value.trim()}); await tick(); };
+    $('stop').onclick = async () => { await post('/api/stop'); await tick(); };
+    async function tick() {
+      try {
+        const d = await fetch('/api/latest', {cache:'no-store'}).then(r => r.json());
+        $('rpm').textContent = d.rpm || '----';
+        $('speed').textContent = d.speed_kmh == null ? '--.-' : d.speed_kmh.toFixed(1);
+        $('tps').textContent = d.throttle_percent;
+        $('battery').textContent = d.battery_voltage == null ? '--.-' : d.battery_voltage.toFixed(2);
+        $('status').textContent = `${d.recording ? `● REC #${d.session_id} ${d.session_name}` : 'STANDBY'} · ${d.status}`;
+        $('status').classList.toggle('recording', d.recording);
+        $('start').disabled = d.recording;
+        $('stop').disabled = !d.recording;
+      } catch (error) {
+        $('status').textContent = 'SERVER OFFLINE';
+      }
+    }
+    setInterval(tick, 250);
+    tick();
+  </script>
+</body>
+</html>

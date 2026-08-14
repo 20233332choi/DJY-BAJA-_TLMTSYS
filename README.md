@@ -1,223 +1,103 @@
-# 대자연 DJY Baja Pit Wall
+# DJY Baja Telemetry System
 
-대자연 DJY Baja 차량용 피트월 대시보드입니다. Rapid Bike EVO USB와 iPhone GPS를 함께 받아 표시하고 저장합니다.
+DJY Baja 차량의 Rapid Bike ECU 데이터, iPhone GPS/IMU, 랩타이밍을 한곳에서 수집하고 표시하는 텔레메트리 프로젝트입니다. ESP32-S3 펌웨어와 Windows 피트월 소프트웨어를 서로 독립적으로 관리할 수 있도록 분리했습니다.
 
-## 새 컴퓨터 설치 요구사항
-
-### 필수 환경
-
-- Windows 10/11 64비트
-- Rapid Bike EVO와 `USB Bike Adaptor`
-- Python 3.10 이상 64비트
-- Edge, Chrome 등 최신 웹 브라우저
-
-Python 설치 시 `Add python.exe to PATH`를 선택해야 `run_app.bat`으로 실행할 수 있습니다. 설치 후 PowerShell에서 다음 명령으로 확인합니다.
-
-```powershell
-python --version
-python -c "import struct; print(struct.calcsize('P') * 8)"
-```
-
-두 번째 명령의 결과가 `64`여야 합니다. 외부 Python 패키지는 사용하지 않으므로 `pip install`은 필요하지 않습니다.
-
-### Rapid Bike USB 드라이버
-
-Rapid Bike Master 또는 Dimsport USB 드라이버를 먼저 설치해야 합니다. 현재 프로그램은 다음 64비트 D2XX DLL을 사용합니다.
+## 프로젝트 구성
 
 ```text
-C:\Program Files\DimSport\Driver DimSport\DSDEVICE64.dll
+DJY-BAJA-_TLMTSYS/
+├─ firmware/
+│  └─ esp32-s3-rapidbike/
+│     ├─ micropython/             # 현재 보드에서 사용하는 운영 펌웨어
+│     ├─ arduino-uart-bridge/     # 최소 유선 브리지 대안
+│     └─ docs/                    # 펌웨어 실험 기록
+├─ software/
+│  ├─ pit-wall/                   # Python 서버와 웹 대시보드
+│  ├─ rbmaster-bridge/            # RB Master 연동 실험용 C 소스
+│  └─ rbmaster-tools/             # 진단 스크립트
+├─ docs/
+│  ├─ hardware/                   # 배선 매뉴얼과 Espressif PDF
+│  └─ images/                     # 핀맵 및 진단 화면
+└─ .local/                        # 제조사 프로그램·DLL 등 로컬 전용 파일(Git 제외)
 ```
 
-설치 여부는 PowerShell에서 확인할 수 있습니다.
+## 빠른 시작
+
+### 1. 피트월 소프트웨어
+
+Windows PowerShell 또는 명령 프롬프트에서 다음을 실행합니다.
 
 ```powershell
-Test-Path "C:\Program Files\DimSport\Driver DimSport\DSDEVICE64.dll"
-```
-
-결과가 `True`여야 합니다. Rapid Bike Master는 USB를 동시에 사용할 수 없으며, 이 프로그램을 실행하면 `RBMASTERPRO.EXE`를 자동으로 종료합니다.
-
-### iPhone GPS와 IMU 사용 시
-
-휴대폰 GPS와 가속도 센서는 HTTPS에서만 사용할 수 있으므로 다음 항목이 추가로 필요합니다.
-
-- 인터넷 연결
-- ngrok 계정과 인증 토큰
-- Windows용 ngrok Agent가 PATH에 등록된 상태
-- iPhone Safari
-
-ngrok 설치 후 처음 한 번 인증 토큰을 등록합니다.
-
-```powershell
-ngrok config add-authtoken "발급받은_토큰"
-ngrok help
-```
-
-토큰은 저장소나 설정 파일에 커밋하지 마세요.
-
-## 처음 실행
-
-1. 프로젝트 폴더 전체를 새 컴퓨터로 옮기거나 GitHub에서 복제합니다.
-2. Rapid Bike USB를 연결합니다.
-3. `run_app.bat`을 실행합니다.
-4. Windows 방화벽 창이 뜨면 개인 네트워크 접근을 허용합니다.
-5. PC 브라우저에서 `http://127.0.0.1:8765/`을 엽니다.
-6. 휴대폰을 사용한다면 `start_gps_https.bat`을 실행하고 표시된 `https://.../phone` 주소를 iPhone Safari에서 엽니다.
-7. `GPS + IMU 전송 시작`을 누르고 위치 및 동작·방향 권한을 허용합니다.
-
-정상 연결 시 대시보드 상태에 `USB live`가 표시됩니다. 프로그램을 두 번 실행하면 USB 또는 `8765` 포트가 충돌할 수 있으므로 한 번만 실행하세요.
-
-### 실행 오류 확인
-
-| 상태 | 확인할 내용 |
-|---|---|
-| `DSDEVICE64.dll not found` | Rapid Bike Master 또는 Dimsport 드라이버 설치 |
-| `USB ECU not found` | USB 케이블, 어댑터 전원, Windows 장치 인식 확인 |
-| `USB busy` | Rapid Bike Master와 중복 실행 여부 확인 |
-| 웹 페이지가 열리지 않음 | `app.py` 실행 여부와 8765 포트, 방화벽 확인 |
-| iPhone GPS/IMU 권한이 없음 | ngrok의 HTTPS `/phone` 주소로 접속했는지 확인 |
-
-## 표시 값
-
-```text
-RPM        Rapid Bike USB에서 읽은 엔진 회전수
-SPEED      iPhone GPS 속도, km/h
-THROTTLE   Rapid Bike 응답의 TPS 열 인덱스 기반 개도량
-FUEL ADD   INJ raw - 100, 현재 추가 연료 분사 보정값
-PHONE IMU  휴대폰 기준 X/Y/Z 선형 가속도와 중력 포함 TOTAL G
-```
-
-## 실행
-
-Rapid Bike Master는 자동으로 종료하고 USB를 직접 읽습니다.
-
-```powershell
-python .\app.py
-```
-
-또는:
-
-```powershell
+cd .\software\pit-wall
 .\run_app.bat
 ```
 
-PC 브라우저에서:
+브라우저에서 `http://127.0.0.1:8765/`을 엽니다. 자세한 설치, GPS/IMU, 랩타이밍, 데이터 저장 방법은 [피트월 소프트웨어 매뉴얼](software/pit-wall/README.md)을 참고하세요.
 
-```text
-http://127.0.0.1:8765/
-```
+### 2. ESP32-S3 펌웨어
 
-첫 화면 메뉴:
-
-```text
-1. 피트 A/B 차량 (통합 화면)
-2. 드라이버 A/B (새 창)
-3. 휴대폰 GPS 전송
-4. 주행기록 열람
-```
-
-피트 A/B 통합 화면에서는 `A/B GPS LAP`, `SPEEDHIVE`, `ECU DASHBOARD`, `RUN CONTROL` 탭으로 기존 기능에 접근할 수 있습니다. 기존 `/timing`, `/lap-timing`, `/map`, `/vehicle`, `/dashboard` 주소도 직접 사용할 수 있습니다.
-
-## 2대 GPS 자체 랩타이밍
-
-Speedhive와 별개로 차량 A/B의 휴대폰 GPS를 동시에 받아 자체 랩타임을 측정할 수 있습니다.
-
-```text
-http://127.0.0.1:8765/lap-timing
-```
-
-각 차량에서 `/phone?vehicle=A`, `/phone?vehicle=B`를 열어 전송을 시작한 뒤, 한 차량이 출발선을 지날 때 해당 차량으로 출발선을 설정합니다. 진행 방향에 직각인 가상선을 만들며, 같은 방향으로 다시 통과할 때 랩을 완료합니다. 피트 화면에는 두 차량의 현재/최근/베스트 랩, 이전 랩 대비 차이, GPS 정확도와 수신 주기, 현재 위치 궤적을 함께 표시합니다. 출발선 부근 GPS 흔들림에 의한 중복 인식을 막기 위해 교차 후 4초 쿨다운을 적용합니다.
-
-휴대폰 브라우저 GPS의 실제 갱신률과 정확도는 기기 및 OS에 따라 달라집니다. 더 정밀한 측정이 필요하면 Raspberry Pi에 연결된 10Hz 이상의 외장 GNSS가 `/gps` API로 같은 형식의 데이터를 보내도록 연결하는 구성이 적합합니다.
-
-정지 상태에서는 GPS 정확도에 비례한 반경 안의 위치 흔들림을 `STILL LOCK`으로 고정합니다. 주행을 시작하면 자동으로 잠금이 풀리고, 저속에서만 좌표를 부드럽게 보정하며 20km/h 이상에서는 랩 교차 정밀도를 위해 원래 좌표를 사용합니다. 정확도 50m 초과 또는 순간이동으로 판단되는 좌표는 버리고 화면의 `DROP` 수에 누적합니다.
-
-출발선은 `GPS ACC`가 15m 이하인 상태가 최소 15초 연속 유지되어 `GPS READY`가 초록색으로 바뀐 뒤 설정하세요. 실제 경기 전에는 야외의 하늘이 열린 장소에서 GPS 전송을 시작하고 30~60초 정도 기다리는 것을 권장합니다. 오랫동안 위치 서비스를 사용하지 않았거나 주변에 건물·금속 구조물이 많으면 1~2분이 걸릴 수 있으므로 시간보다 `GPS READY` 표시를 우선합니다.
-
-위치 지도는 항상 북쪽이 위쪽인 `NORTH UP` 방식입니다. 화면 가장자리와 우측 상단 나침반에 N/E/S/W를 표시하며, 시작선의 노란 화살표는 차량이 통과해야 하는 진행 방향입니다. 화살표 끝에는 `NE 45°`와 같은 8방위 및 방위각을 함께 표시합니다.
-
-지도의 `START SIZE` 슬라이더는 시작선 마커의 화면상 길이만 40~200px 범위에서 조절합니다. 실제 랩 판정 범위는 상단의 `HALF WIDTH (m)` 값이며, 표시 크기를 바꿔도 판정 범위는 변하지 않습니다.
-
-지도는 GPS가 15초간 안정되어 `READY`가 되기 전까지 흔들리는 좌표를 궤적에 넣지 않습니다. 출발선을 새로 설정하면 기존 궤적을 비우고 `START LOCK`으로 전환하여 출발선을 화면 중앙에 고정합니다. 코스 전체를 맞춰 보려면 `AUTO FIT`, 잘못 쌓인 표시만 지우려면 `CLEAR TRAIL`을 사용합니다. 지도 왼쪽에는 차량별 현재 방위각과 8방위를 표시하고 차량 위치의 화살표도 같은 방향을 가리킵니다. GPS 방위각은 주행 방향이므로 정지 상태의 최초 수신 때는 값이 없을 수 있으며, 주행이 시작되면 GPS 값 또는 연속 좌표로 계산한 마지막 유효 방향을 유지합니다.
-
-실제 도로 지도를 별도 창으로 보려면 `/lap-timing` 또는 `/timing` 상단의 `REAL MAP ↗`를 누르거나 아래 주소를 직접 엽니다.
-
-```text
-http://127.0.0.1:8765/map
-```
-
-실제 지도에서는 OpenStreetMap 배경 위에 차량 A/B의 현재 위치, GPS 정확도 반경, READY 이후의 이동 궤적, 방위각 화살표와 출발선을 표시합니다. `ALL/A/B`로 표시 차량을 고르고 `START`, `FOLLOW A`, `FOLLOW B`, `FREE`로 화면 중심의 추적 대상을 선택합니다. 지도 타일을 받으려면 인터넷 연결이 필요하지만 타일 연결이 끊겨도 로컬 GPS 수신과 랩 측정은 계속 동작합니다.
-
-## Speedhive 라이브 타이밍
-
-첫 화면에서 `Speedhive 라이브 타이밍`을 선택하거나 브라우저에서 아래 주소를 엽니다.
-
-```text
-http://127.0.0.1:8765/timing
-```
-
-기본값은 `OHJPNRVR-2147485793` 이벤트입니다. 화면 상단 입력란에 다른 Speedhive 라이브 타이밍 URL 또는 이벤트 ID를 넣고 `연결`을 누르면 해당 이벤트로 전환됩니다. 마지막으로 연결한 이벤트 ID는 브라우저에 저장됩니다.
-
-라이브 화면은 인터넷에서 현재 활성 세션을 약 2초 간격으로 확인해 다음 값을 표시합니다.
-
-```text
-경기 및 세션 이름, 그룹
-전체/클래스 순위, 차량 번호, 참가자, 클래스
-랩 수, 최근 랩, 베스트 랩, 선두와의 차이, 총 주행 시간
-```
-
-Speedhive 서버 연결이 잠시 끊어지면 마지막으로 받은 데이터가 `STALE` 상태로 표시됩니다. 아직 활성 세션이 없거나 MYLAPS에서 이벤트 공개가 종료되면 라이브 데이터가 표시되지 않을 수 있습니다.
-
-라이브 타이밍 화면 상단에는 Speedhive에서 수신한 현재 트랙 플래그가 항상 표시됩니다.
-
-### 차량용 드라이버 화면
-
-홈 화면의 `차량용 드라이버 화면` 또는 라이브 타이밍 화면의 `DRIVER ↗`를 누르면 별도 창으로 열립니다.
-
-```text
-http://127.0.0.1:8765/driver
-```
-
-출발 전에 Speedhive 이벤트를 불러와 자신의 차량을 선택합니다. 주행 화면에는 최근 랩타임과 바로 앞 차량과의 GAP을 크게 표시하고, 전체 참가자 중 현재 순위·클래스 순위·랩 수·베스트랩을 함께 표시합니다. 새 랩이 감지되면 직전 랩보다 빠를 때 원색 초록 `▲`, 느릴 때 원색 빨강 `▼`와 차이 초를 3.5초 동안 전체화면으로 보여줍니다. 차량 선택은 브라우저에 저장되며 `차량 변경` 버튼으로 다시 선택할 수 있습니다.
-
-드라이버 화면의 시작 메뉴에서 `LOCAL GPS`를 선택하면 Speedhive 없이 차량 A/B의 자체 GPS 랩타임을 사용할 수 있습니다. 이 모드에서는 드라이버 화면이 휴대폰 GPS를 직접 `/gps`로 전송하므로 `/phone` 페이지를 별도로 열 필요가 없습니다. 현재 랩, 최근 랩, 베스트 랩, 이전 랩 대비 ▲/▼, 속도, GPS 정확도와 준비 상태를 표시합니다. GPS 권한이 자동으로 시작되지 않으면 상단 `GPS START`를 누르세요. Speedhive 연결이 가능할 때는 LOCAL GPS 모드에서도 트랙 플래그 경고를 계속 받습니다.
-
-차량별 LOCAL GPS 화면을 바로 열려면 `/driver?source=local&vehicle=A` 또는 `/driver?source=local&vehicle=B`를 사용할 수 있습니다.
-
-LOCAL GPS 드라이버 화면은 F1 스티어링 휠처럼 주행 중 즉시 읽을 값의 우선순위를 높여 중앙에 GPS 속도, 상단에 12칸 RPM 시프트 라이트와 숫자 RPM, 좌우에 축소된 LAST/CURRENT LAP을 배치합니다. RapidBike USB RPM과 스로틀은 현재 차량 A에만 연결되므로 차량 B에서는 `RPM ----`, `THROTTLE --`로 표시합니다. 차량 B에 별도 ECU 입력을 추가하기 전까지 차량 A의 엔진 값을 B에 대입하지 않습니다.
-
-피트 월의 `/timing`과 `/lap-timing` 화면에서는 `ALL / A / B`로 열람 차량과 명령 송신 차량을 한 번에 선택합니다. `ALL`은 A/B 정보를 함께 표시하고 두 드라이버에게 보내며, `A` 또는 `B`는 선택 차량 정보만 표시하고 해당 드라이버에게만 보냅니다. `GREEN`, `YELLOW`, `RED`, `STOP`, `BOX THIS LAP`을 수동 전송할 수 있고 `CLEAR`로 선택 대상의 경고를 해제합니다. `RED`, `YELLOW`, `STOP`은 드라이버 화면에 지속되는 전체화면 경고이고, `BOX THIS LAP`은 5초간 점멸한 뒤 상단 배지에 남습니다. 새 랩의 델타 전체화면에는 해당 `LAP` 번호도 같이 표시됩니다.
-
-드라이버 화면은 플래그 변경을 가장 높은 우선순위로 표시합니다. 옐로·레드 플래그는 해제될 때까지 원색 전체화면 경고로 유지되고, 그린은 `TRACK CLEAR`, 피니시와 스톱은 세션 상태를 전체화면으로 안내합니다. 피트 화면의 `CHEQUERED FLAG` 버튼으로 선택한 차량에 수동 체커드 플래그를 보낼 수 있으며 `CLEAR`로 해제합니다. Speedhive의 `Purple` 값은 공식 의미가 정의되지 않은 사용자 지정 상태이므로 피트 화면에 `CUSTOM`으로만 표시하며 드라이버 경고로 사용하지 않습니다.
-
-## iPhone GPS
-
-GUI가 실행되면 GPS 수신 서버가 `8765` 포트로 열립니다.
-
-아이폰 Safari에서 HTTPS 주소로 접속해야 위치 권한이 정상 동작합니다. ngrok를 직접 실행하거나 아래 파일을 사용하세요.
+현재 보드에서 사용하는 운영 파일은 [MicroPython `main.py`](firmware/esp32-s3-rapidbike/micropython/main.py)입니다. 기본 MicroPython 이미지와 설치 도구도 함께 보관합니다.
 
 ```powershell
-.\start_gps_https.bat
+cd .\firmware\esp32-s3-rapidbike\micropython\tools
+.\install_wired_bridge.ps1 -Port COM8
 ```
 
-아이폰에서 표시된 `https://.../phone` 주소를 열고 `GPS + IMU 전송 시작`을 누르면 대시보드의 `SPEED`와 가속도 값이 갱신됩니다.
+전체 설치 및 복구 방법은 [ESP32-S3 펌웨어 매뉴얼](firmware/esp32-s3-rapidbike/README.md)을 참고하세요.
 
-아이폰은 버튼을 누를 때 GPS와 동작 및 방향 접근 권한을 모두 허용해야 합니다. 휴대폰 기준 X/Y/Z 축이므로 차량에 단단히 고정한 방향을 주행 중 바꾸지 마세요.
+## 하드웨어 매뉴얼
 
-## 저장
+사용 보드는 `ESP32-S3-DevKitC-1` 계열이며 Rapid Bike 통신은 3.3V TTL UART 기준입니다.
 
-`차량 to 서버` 화면에서 `주행 시작`을 누른 뒤부터 저장되고, `주행 종료`를 누르면 해당 세션이 닫힙니다.
-`주행기록 열람`에서는 왼쪽 세션을 선택해 해당 주행의 요약, RPM/속도 추이, 상세 샘플을 확인할 수 있습니다.
+| ESP32-S3 | 역할 | 연결 대상 |
+|---|---|---|
+| GPIO17 (`U1TXD`) | ECU 방향 송신 | Rapid Bike RX |
+| GPIO18 (`U1RXD`) | ECU 응답 수신 | Rapid Bike TX/Data |
+| GND | 신호 기준 | Rapid Bike GND |
+| USB-to-UART | PC 연결 및 전원 | Windows PC USB |
 
-```text
-data/djy_baja.sqlite3
-sessions
-samples
-```
+> **전기적 주의:** ESP32 GPIO에는 5V 또는 차량의 12V를 직접 연결하면 안 됩니다. Rapid Bike 측 신호가 3.3V TTL인지 확인하고, 보드는 USB 또는 검증된 레귤레이터로 전원 공급하세요. 차량과 ESP32 사이에는 반드시 공통 GND가 필요합니다.
 
-새 주행 샘플에는 `accel_x_g`, `accel_y_g`, `accel_z_g`, `total_g`, `motion_age`도 함께 저장됩니다.
-또한 ECU 원본 응답(`raw_hex`), GPS 차량 A/B의 수신 시각·속도·위도·경도·정확도·방향·고도·수신 지연, USB/IMU 수신 시각도 샘플별로 저장됩니다. 기존 `data/djy_baja.sqlite3`는 프로그램 재시작 시 필요한 컬럼이 자동으로 추가됩니다.
+보드의 GPIO43/44는 PC USB-to-UART 통신에 사용하고 GPIO17/18은 Rapid Bike 통신에 사용합니다. Octal Flash/PSRAM 모델에서는 GPIO35~37이 내부 메모리에 사용될 수 있으므로 외부 배선에 사용하지 않습니다.
 
-주행기록에서 세션을 선택한 뒤 `TRACK MAP`을 누르면 저장된 차량 A/B 주행라인을 지도에서 다시 볼 수 있습니다. `ALL LAPS` 또는 랩 번호를 선택할 수 있으며, GPS 원본점과 필터링된 표시점이 함께 보존됩니다.
-기록 열람 화면의 `VEHICLE A/B` 탭에서는 차량별 정보와 랩 목록을 따로 확인할 수 있고, 각 랩의 랩타임·주행거리·최고/평균속도·GPS 포인트 및 해당 랩 지도도 확인할 수 있습니다.
+- [상세 배선·LED·복구 매뉴얼](docs/hardware/README.md)
+- [ESP32-S3 DevKit 전체 PDF](docs/hardware/esp32-s3-devkitc-1-user-guide.pdf)
+- [ESP32-S3 핀 배치 이미지](docs/images/hardware/esp32_s3_pin_layout.png)
 
-이전 실험·캡처 자료와 실제 주행 DB는 로컬에만 보존되며 GitHub 업로드에서는 제외됩니다.
+## 기본 통신 설정
+
+| 항목 | 값 |
+|---|---|
+| UART 시작 속도 | 9600 baud, 8-N-1 |
+| UART 고속 전환 | 38400 baud |
+| ESP32 AP SSID | `RapidBike-ESP32` |
+| ESP32 AP 주소 | `192.168.4.1` |
+| TCP 데이터 포트 | `8888` |
+| UDP 검색 포트 | `8889` |
+| PC 대시보드 | `http://127.0.0.1:8765/` |
+
+AP 비밀번호는 펌웨어 소스에 정의되어 있습니다. 실제 운용 전에는 팀 전용 비밀번호로 변경하세요. 일반 공유기나 휴대폰 핫스팟 접속 정보는 `wifi_config.py`에 저장하며 Git에 포함하지 않습니다.
+
+## GitHub에 포함하지 않는 파일
+
+- 실제 주행 SQLite DB와 로그
+- Wi-Fi SSID/비밀번호가 들어 있는 `wifi_config.py`
+- PlatformIO 빌드 캐시와 Python 캐시
+- Rapid Bike Master 설치 파일, DLL, 패치 실행 파일
+- 패킷 캡처 및 임시 진단 결과
+
+제조사 프로그램은 `.local/rbmaster/`에 로컬 보관되며 저장소에는 올리지 않습니다. 이미 Git 기록에 들어간 제조사 바이너리가 있다면 단순 삭제 커밋만으로 과거 기록에서 사라지지는 않으므로, 공개 저장소 전환 전 별도의 이력 정리가 필요합니다.
+
+## 외부 문서 출처
+
+동봉한 ESP32-S3 PDF와 핀 이미지는 Espressif의 `esp-dev-kits` 문서에서 가져왔습니다.
+
+- 원문: <https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/>
+- 원본 저장소: <https://github.com/espressif/esp-dev-kits>
+- 문서 라이선스: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+
+PDF 파일은 내용 변경 없이 이름만 프로젝트 용도에 맞게 정리했습니다. Espressif 및 제품명은 각 권리자의 상표입니다.
+
+동봉한 ESP32-S3 MicroPython v1.28.0 Octal-SPIRAM 바이너리는
+[MicroPython 공식 다운로드](https://micropython.org/download/ESP32_GENERIC_S3/)에서
+제공되며 [MIT 라이선스](https://github.com/micropython/micropython/blob/master/LICENSE)를 따릅니다.

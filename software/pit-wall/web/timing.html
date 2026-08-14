@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJY Speedhive Live Timing</title>
+  <link rel="stylesheet" href="/djy.css">
+  <style>html.embed-mode body > .topbar { display: none !important; }</style>
+  <style>
+    body { min-height: 100vh; }
+    .source-control { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 10px; padding: 14px 22px; border-bottom: 1px solid var(--line-strong); }
+    .source-control label { grid-column: 1 / 3; color: var(--muted); font: 10px Consolas, monospace; }
+    .source-control input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid var(--line-strong); outline: none; background: #050505; color: var(--text); font-family: Consolas, monospace; }
+    .source-control input:focus { border-color: #777; }
+    .source-control button { height: 42px; padding: 0 18px; border: 1px solid var(--green); background: #050505; color: var(--green); font-weight: 750; cursor: pointer; }
+    .pit-command-panel { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 14px; padding: 10px 22px; border-bottom: 1px solid var(--line-strong); background: #020202; }
+    .pit-command-title strong, .pit-command-title span { display: block; }
+    .pit-command-title strong { color: #fff; font: 900 13px Consolas, monospace; }
+    .pit-command-title span { margin-top: 4px; color: var(--muted); font: 9px Consolas, monospace; }
+    .pit-targets, .pit-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pit-targets button, .pit-buttons button { height: 36px; padding: 0 12px; border: 2px solid #444; background: #000; color: #aaa; font: 900 10px Consolas, monospace; cursor: pointer; }
+    .pit-targets button.selected { border-color: var(--blue); color: var(--blue); }
+    .pit-buttons [data-pit-command="GREEN"] { border-color: #00ff00; color: #00ff00; }
+    .pit-buttons [data-pit-command="YELLOW"] { border-color: #ffff00; color: #ffff00; }
+    .pit-buttons [data-pit-command="RED"], .pit-buttons [data-pit-command="STOP"] { border-color: #ff0000; color: #ff0000; }
+    .pit-buttons [data-pit-command="CHECKERED"] { border-color: #fff; background: repeating-conic-gradient(#fff 0 25%, #000 0 50%) 50% / 10px 10px; color: #000; text-shadow: 0 0 2px #fff; }
+    .pit-buttons [data-pit-command="BOX"] { border-color: #ff7b00; background: #ff7b00; color: #000; }
+    .pit-buttons [data-pit-command="CLEAR"] { border-color: #fff; color: #fff; }
+    .pit-vehicle-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; border-bottom: 1px solid var(--line-strong); background: var(--line-strong); }
+    .pit-vehicle-card { display: grid; grid-template-columns: auto repeat(4, minmax(0, 1fr)); align-items: center; gap: 12px; padding: 10px 16px; border: 2px solid transparent; background: #000; color: #fff; text-align: left; cursor: pointer; }
+    .pit-vehicle-card.selected { border-color: var(--blue); background: #021014; }
+    body.focus-a .pit-vehicle-summary,
+    body.focus-b .pit-vehicle-summary { grid-template-columns: 1fr; }
+    body.focus-a .pit-vehicle-card[data-pit-vehicle="B"],
+    body.focus-b .pit-vehicle-card[data-pit-vehicle="A"] { display: none; }
+    .pit-vehicle-letter { color: var(--amber); font: 950 30px Consolas, monospace; }
+    .pit-vehicle-card[data-pit-vehicle="B"] .pit-vehicle-letter { color: var(--blue); }
+    .pit-vehicle-metric span, .pit-vehicle-metric strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pit-vehicle-metric span { color: var(--muted); font: 8px Consolas, monospace; }
+    .pit-vehicle-metric strong { margin-top: 4px; font: 800 14px Consolas, monospace; }
+    .session-head { position: sticky; top: 0; z-index: 4; display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 22px; border-bottom: 1px solid var(--line); background: #000; }
+    .session-head h2 { margin: 0; font-size: clamp(20px, 3vw, 34px); line-height: 1.1; }
+    .session-head p { margin: 7px 0 0; color: var(--muted); font: 11px Consolas, monospace; }
+    #live-status { align-self: center; color: var(--muted); font: 11px Consolas, monospace; white-space: nowrap; }
+    #live-status.live { color: var(--green); }
+    #live-status.stale, #live-status.error { color: var(--red); }
+    .session-signals { display: flex; align-items: center; gap: 12px; }
+    .track-flag { min-width: 138px; padding: 7px 12px; border: 2px solid #777; background: #111; color: #fff; text-align: center; }
+    .track-flag span, .track-flag strong { display: block; }
+    .track-flag span { font: 8px Consolas, monospace; letter-spacing: .12em; }
+    .track-flag strong { margin-top: 3px; font: 900 19px/1 Consolas, monospace; }
+    .track-flag.flag-green { border-color: #00ff00; background: #00ff00; color: #000; }
+    .track-flag.flag-yellow { border-color: #ffff00; background: #ffff00; color: #000; }
+    .track-flag.flag-red, .track-flag.flag-stop { border-color: #ff0000; background: #ff0000; color: #000; }
+    .track-flag.flag-custom { border-color: #ff00ff; background: #000; color: #ff00ff; }
+    .track-flag.flag-finish { border-color: #fff; background: repeating-conic-gradient(#fff 0 25%, #000 0 50%) 50% / 16px 16px; color: #fff; text-shadow: 0 1px 2px #000, 1px 0 2px #000; }
+    .timing-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .timing-body { padding: 18px 22px 28px; }
+    .timing-table th:first-child, .timing-table td:first-child { width: 58px; text-align: center; }
+    .timing-table th.driver, .timing-table td.driver, .timing-table th.class-name, .timing-table td.class-name { text-align: left; }
+    .timing-table td.position { color: var(--green); font-size: 15px; font-weight: 800; }
+    .timing-table td.number { color: var(--amber); font-weight: 750; }
+    .timing-table tr.best td.best-lap { color: var(--blue); font-weight: 750; }
+    .pit { display: inline-block; margin-left: 7px; padding: 2px 5px; border: 1px solid var(--red); color: var(--red); font: 9px Consolas, monospace; }
+    .empty { padding: 46px 18px; color: var(--muted); font: 12px Consolas, monospace; text-align: center; }
+    @media (max-width: 860px) {
+      .pit-command-panel { grid-template-columns: 1fr; }
+      .timing-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .timing-body { padding: 12px 0 24px; }
+      .data-table-wrap { border-left: 0; border-right: 0; }
+      .pit-vehicle-summary { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .source-control { grid-template-columns: 1fr; padding: 12px 14px; }
+      .source-control label { grid-column: auto; }
+      .session-head { grid-template-columns: 1fr; padding: 15px 14px; }
+      .session-signals { justify-content: space-between; }
+    }
+  </style>
+  <script>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed-mode');</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>대자연 DJY · LIVE TIMING</h1><small>SPEEDHIVE RACE CONTROL</small></div>
+    <nav class="nav"><a href="/">HOME</a><a href="/vehicle">REC</a><a href="/dashboard">PIT WALL</a><a href="/logs">ARCHIVE</a><a href="/map" target="_blank" rel="noopener">REAL MAP ↗</a><a href="/driver" target="_blank" rel="noopener">DRIVER ↗</a></nav>
+  </header>
+
+  <main>
+    <section class="source-control">
+      <label for="event-source">SPEEDHIVE EVENT URL OR EVENT ID</label>
+      <input id="event-source" autocomplete="off" spellcheck="false" value="https://speedhive.mylaps.com/livetiming/5A241CC246F6AD1F-2147483649/active">
+      <button id="connect" type="button">연결</button>
+    </section>
+
+    <section class="pit-command-panel">
+      <div class="pit-command-title"><strong>PIT → DRIVER</strong><span id="pit-command-status">NO MANUAL COMMAND</span></div>
+      <div class="pit-targets"><button class="selected" data-pit-target="ALL">ALL</button><button data-pit-target="A">A</button><button data-pit-target="B">B</button></div>
+      <div class="pit-buttons"><button data-pit-command="GREEN">GREEN</button><button data-pit-command="YELLOW">YELLOW</button><button data-pit-command="RED">RED</button><button data-pit-command="STOP">STOP</button><button data-pit-command="CHECKERED">CHEQUERED FLAG</button><button data-pit-command="BOX">BOX THIS LAP</button><button data-pit-command="CLEAR">CLEAR</button></div>
+    </section>
+    <section class="pit-vehicle-summary">
+      <button class="pit-vehicle-card" data-pit-vehicle="A"><span class="pit-vehicle-letter">A</span><span class="pit-vehicle-metric"><span>GPS</span><strong data-local-a="gps">OFFLINE</strong></span><span class="pit-vehicle-metric"><span>SPEED</span><strong data-local-a="speed">-- km/h</strong></span><span class="pit-vehicle-metric"><span>LAPS</span><strong data-local-a="laps">0</strong></span><span class="pit-vehicle-metric"><span>LAST</span><strong data-local-a="last">--:--.---</strong></span></button>
+      <button class="pit-vehicle-card" data-pit-vehicle="B"><span class="pit-vehicle-letter">B</span><span class="pit-vehicle-metric"><span>GPS</span><strong data-local-b="gps">OFFLINE</strong></span><span class="pit-vehicle-metric"><span>SPEED</span><strong data-local-b="speed">-- km/h</strong></span><span class="pit-vehicle-metric"><span>LAPS</span><strong data-local-b="laps">0</strong></span><span class="pit-vehicle-metric"><span>LAST</span><strong data-local-b="last">--:--.---</strong></span></button>
+    </section>
+
+    <section class="session-head">
+      <div><h2 id="event-name">Speedhive 연결 대기</h2><p id="session-name">EVENT SOURCE를 입력하고 연결하세요.</p></div>
+      <div class="session-signals"><div class="track-flag" id="track-flag"><span>TRACK FLAG</span><strong>UNKNOWN</strong></div><div id="live-status">STANDBY</div></div>
+    </section>
+
+    <section class="metric-strip timing-metrics">
+      <div class="metric"><div class="metric-label">ENTRANTS</div><div class="metric-value" id="entrants">--</div></div>
+      <div class="metric"><div class="metric-label">LAPS</div><div class="metric-value" id="laps">--</div></div>
+      <div class="metric"><div class="metric-label">BEST LAP</div><div class="metric-value signal-blue" id="best-lap">--:--.---</div></div>
+      <div class="metric"><div class="metric-label">RACE TIME</div><div class="metric-value" id="race-time">--:--:--</div></div>
+      <div class="metric"><div class="metric-label">TIME TO GO</div><div class="metric-value signal-amber" id="time-to-go">--:--:--</div></div>
+    </section>
+
+    <section class="timing-body">
+      <div class="data-table-wrap">
+        <table class="timing-table">
+          <thead><tr><th>POS</th><th>CL</th><th>NO</th><th class="driver">DRIVER</th><th class="class-name">CLASS</th><th>LAPS</th><th>LAST</th><th>BEST</th><th>GAP</th><th>TOTAL</th></tr></thead>
+          <tbody id="ranking"><tr><td colspan="10" class="empty">NO LIVE DATA</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const DEFAULT_EVENT_ID = 'OHJPNRVR-2147485793';
+    const $ = id => document.getElementById(id);
+    let eventId = DEFAULT_EVENT_ID;
+    let loading = false;
+    let pitTarget = 'ALL';
+    let pitCommandLoading = false;
+    let latestPitCommandData = {commands:[]};
+    let timingClock = {
+      sessionId: null,
+      sourceRaceMs: null,
+      sourceToGoMs: null,
+      receivedAt: 0,
+      running: false,
+    };
+
+    function extractEventId(value) {
+      const input = value.trim();
+      const pathMatch = input.match(/\/livetiming\/([^/?#]+)/i);
+      const candidate = pathMatch ? pathMatch[1] : input;
+      return /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(candidate) ? candidate : null;
+    }
+
+    function renderPitCommands(data) {
+      latestPitCommandData = data;
+      const text = data.commands.length ? data.commands.map(item => `${item.target}:${item.command}`).join(' · ') : 'NO MANUAL COMMAND';
+      $('pit-command-status').textContent = `VIEW/SEND ${pitTarget} · ${text}`;
+    }
+
+    function setPitTarget(target) {
+      pitTarget = target;
+      document.body.classList.toggle('focus-a', target === 'A');
+      document.body.classList.toggle('focus-b', target === 'B');
+      document.querySelectorAll('[data-pit-target]').forEach(item => item.classList.toggle('selected', item.dataset.pitTarget === target));
+      document.querySelectorAll('[data-pit-vehicle]').forEach(item => item.classList.toggle('selected', item.dataset.pitVehicle === target));
+      renderPitCommands(latestPitCommandData);
+    }
+
+    function formatLocalLap(seconds) {
+      if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '--:--.---';
+      const value = Math.max(0, Number(seconds));
+      return `${Math.floor(value/60)}:${(value%60).toFixed(3).padStart(6,'0')}`;
+    }
+
+    function renderPitVehicle(vehicleId, vehicle) {
+      const prefix = vehicleId.toLowerCase();
+      document.querySelector(`[data-local-${prefix}="gps"]`).textContent = vehicle.gps_live ? '● LIVE' : 'OFFLINE';
+      document.querySelector(`[data-local-${prefix}="speed"]`).textContent = vehicle.speed_kmh == null ? '-- km/h' : `${Number(vehicle.speed_kmh).toFixed(1)} km/h`;
+      document.querySelector(`[data-local-${prefix}="laps"]`).textContent = vehicle.lap_count;
+      document.querySelector(`[data-local-${prefix}="last"]`).textContent = formatLocalLap(vehicle.last_lap_s);
+    }
+
+    async function refreshPitVehicles() {
+      try {
+        const response = await fetch('/api/lap/status', {cache:'no-store'});
+        const data = await response.json();
+        if (response.ok) { renderPitVehicle('A',data.vehicles.A); renderPitVehicle('B',data.vehicles.B); }
+      } catch (_) {}
+    }
+
+    async function refreshPitCommands() {
+      try {
+        const response = await fetch('/api/pit-command', {cache:'no-store'});
+        const data = await response.json();
+        if (response.ok) renderPitCommands(data);
+      } catch (_) {}
+    }
+
+    async function sendPitCommand(command) {
+      if (pitCommandLoading) return;
+      if (['RED','STOP','CHECKERED'].includes(command) && !confirm(`${command} 신호를 ${pitTarget} 드라이버에게 보낼까요?`)) return;
+      pitCommandLoading = true;
+      try {
+        const response = await fetch('/api/pit-command', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({command, target:pitTarget})});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        renderPitCommands(data);
+      } catch (error) {
+        $('pit-command-status').textContent = `SEND ERROR · ${error.message}`;
+      } finally {
+        pitCommandLoading = false;
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+    }
+
+    function display(value, fallback = '--') {
+      return value === null || value === undefined || value === '' ? fallback : value;
+    }
+
+    function parseClock(value) {
+      if (!value) return null;
+      const parts = String(value).split(':').map(Number);
+      if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return null;
+      return ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * 1000;
+    }
+
+    function formatClock(milliseconds) {
+      if (milliseconds === null) return '--:--:--';
+      const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor(seconds % 3600 / 60);
+      const remainder = seconds % 60;
+      return [hours, minutes, remainder].map(value => String(value).padStart(2, '0')).join(':');
+    }
+
+    function updateClockAnchor(data) {
+      const sourceRaceMs = parseClock(data.race_time);
+      const sourceToGoMs = parseClock(data.time_to_go);
+      const sourceChanged = timingClock.sessionId !== data.session_id
+        || timingClock.sourceRaceMs !== sourceRaceMs
+        || timingClock.sourceToGoMs !== sourceToGoMs;
+      if (sourceChanged) {
+        timingClock.sessionId = data.session_id;
+        timingClock.sourceRaceMs = sourceRaceMs;
+        timingClock.sourceToGoMs = sourceToGoMs;
+        timingClock.receivedAt = performance.now();
+      }
+      timingClock.running = !data.stale && Number(data.flag) === 0;
+      paintClocks();
+    }
+
+    function paintClocks() {
+      const elapsed = timingClock.running
+        ? Math.floor((performance.now() - timingClock.receivedAt) / 1000) * 1000
+        : 0;
+      const raceTime = timingClock.sourceRaceMs === null ? null : timingClock.sourceRaceMs + elapsed;
+      const timeToGo = timingClock.sourceToGoMs === null ? null : timingClock.sourceToGoMs - elapsed;
+      $('race-time').textContent = formatClock(raceTime);
+      $('time-to-go').textContent = formatClock(timeToGo);
+    }
+
+    function gapText(row) {
+      if (row.gap !== null && row.gap !== undefined && row.gap !== '') return row.gap;
+      const hasCompletedLap = Number(row.laps) > 0 || Boolean(row.last_lap || row.best_lap);
+      return String(row.position) === '1' && hasCompletedLap ? 'LEADER' : '--';
+    }
+
+    function renderFlag(data) {
+      const names = {0:'GREEN', 1:'YELLOW', 2:'RED', 3:'FINISH', 4:'STOP', 5:'PURPLE', 6:'UNKNOWN'};
+      const sourceName = data.flag_name || names[Number(data.flag)] || 'UNKNOWN';
+      const name = sourceName === 'PURPLE' ? 'CUSTOM' : sourceName;
+      const flag = $('track-flag');
+      flag.className = `track-flag flag-${name.toLowerCase()}`;
+      flag.querySelector('strong').textContent = name;
+    }
+
+    function render(data) {
+      $('event-name').textContent = data.event_name || '이름 없는 Speedhive 이벤트';
+      $('session-name').textContent = [data.session_name, data.group_name, data.start_time].filter(Boolean).join(' · ') || `EVENT ${data.event_id}`;
+      $('entrants').textContent = data.competitors.length;
+      $('laps').textContent = display(data.lap_count);
+      $('best-lap').textContent = display(data.best_lap, '--:--.---');
+      updateClockAnchor(data);
+      renderFlag(data);
+
+      const status = $('live-status');
+      status.className = data.stale ? 'stale' : 'live';
+      const updated = new Date(data.fetched_at * 1000).toLocaleTimeString('ko-KR', {hour12:false});
+      status.textContent = data.stale ? `STALE · ${updated}` : `● LIVE · ${updated}`;
+
+      if (!data.competitors.length) {
+        $('ranking').innerHTML = '<tr><td colspan="10" class="empty">ACTIVE SESSION HAS NO COMPETITORS</td></tr>';
+        return;
+      }
+      $('ranking').innerHTML = data.competitors.map(row => `
+        <tr class="${row.best_overall ? 'best' : ''}">
+          <td class="position">${escapeHtml(display(row.position))}</td>
+          <td>${escapeHtml(display(row.class_position))}</td>
+          <td class="number">${escapeHtml(display(row.number))}</td>
+          <td class="driver">${escapeHtml(row.name)}${row.in_pit ? '<span class="pit">PIT</span>' : ''}</td>
+          <td class="class-name">${escapeHtml(row.class_name)}</td>
+          <td>${escapeHtml(display(row.laps))}</td>
+          <td>${escapeHtml(display(row.last_lap))}</td>
+          <td class="best-lap">${escapeHtml(display(row.best_lap))}</td>
+          <td>${escapeHtml(gapText(row))}</td>
+          <td>${escapeHtml(display(row.total_time))}</td>
+        </tr>`).join('');
+    }
+
+    function showError(message) {
+      $('live-status').className = 'error';
+      $('live-status').textContent = 'OFFLINE';
+      $('session-name').textContent = message;
+    }
+
+    function connect() {
+      const parsed = extractEventId($('event-source').value);
+      if (!parsed) {
+        showError('올바른 Speedhive 이벤트 URL 또는 ID를 입력하세요.');
+        return;
+      }
+      eventId = parsed;
+      localStorage.setItem('djy_speedhive_event_id', eventId);
+      $('event-source').value = `https://speedhive.mylaps.com/livetiming/${eventId}/active`;
+      $('live-status').className = '';
+      $('live-status').textContent = 'CONNECTING';
+      tick();
+    }
+
+    async function tick() {
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch(`/api/speedhive/active?event_id=${encodeURIComponent(eventId)}`, {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        render(data);
+      } catch (error) {
+        showError(error.message || 'Speedhive 연결 실패');
+      } finally {
+        loading = false;
+      }
+    }
+
+    $('connect').onclick = connect;
+    $('event-source').addEventListener('keydown', event => { if (event.key === 'Enter') connect(); });
+    document.querySelectorAll('[data-pit-target]').forEach(button => button.onclick = () => setPitTarget(button.dataset.pitTarget));
+    document.querySelectorAll('[data-pit-vehicle]').forEach(button => button.onclick = () => setPitTarget(button.dataset.pitVehicle));
+    document.querySelectorAll('[data-pit-command]').forEach(button => button.onclick = () => sendPitCommand(button.dataset.pitCommand));
+    const savedEventId = extractEventId(localStorage.getItem('djy_speedhive_event_id') || '') || DEFAULT_EVENT_ID;
+    $('event-source').value = `https://speedhive.mylaps.com/livetiming/${savedEventId}/active`;
+    eventId = savedEventId;
+    setInterval(paintClocks, 250);
+    setInterval(tick, 2000);
+    setInterval(refreshPitCommands, 1000);
+    setInterval(refreshPitVehicles, 500);
+    refreshPitCommands();
+    refreshPitVehicles();
+    tick();
+  </script>
+</body>
+</html>

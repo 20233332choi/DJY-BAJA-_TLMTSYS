@@ -3,5 +3,14 @@ __pycache__/
 *.sqlite3
 *.pcap
 *.pcapng
+*.log
+*.exe
+*.dll
 ngrok_gps*.log
+bridge_error.txt
+.local/
+.platformio-core/
+**/.pio/
 archive_dev/
+firmware/esp32-s3-rapidbike/micropython/config/wifi_config.py
+software/rbmaster-tools/diagnostics/*_result.txt
