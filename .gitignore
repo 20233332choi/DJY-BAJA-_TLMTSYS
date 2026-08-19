@@ -13,4 +13,5 @@ bridge_error.txt
 **/.pio/
 archive_dev/
 firmware/esp32-s3-rapidbike/micropython/config/wifi_config.py
+firmware/esp32-s3-rapidbike/micropython/config/relay_config.py
 software/rbmaster-tools/diagnostics/*_result.txt

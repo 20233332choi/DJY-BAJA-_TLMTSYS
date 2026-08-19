@@ -19,6 +19,8 @@ HOST_ERROR_STATUS_REQUEST = bytes((0xF0, 0x0D, 0x45, 0x52))
 # ECU's one-byte acknowledgement, so both UARTs must follow at that point.
 SET_HIGH_BAUD_REQUEST = bytes((0xAA, 0x5B, 0x55, 0x26, 0x80))
 SET_START_BAUD_REQUEST = bytes((0xAA, 0x5B, 0x55, 0x09, 0x63))
+MAP_DOWNLOAD_COMMAND = 0x65
+RELAY_MAX_PACKET_BYTES = 65536
 WIFI_SSID = "RapidBike-ESP32"
 WIFI_PASSWORD = "RapidBike125"
 WIFI_PORT = 8888
@@ -157,6 +159,243 @@ def start_wifi_bridge():
     return interface, listener, discovery, ip_address, mode
 
 
+def load_relay_config():
+    try:
+        import relay_config
+    except ImportError:
+        return None
+    url = str(getattr(relay_config, "RELAY_URL", "")).strip()
+    token = str(getattr(relay_config, "RELAY_TOKEN", "")).strip()
+    vehicle_id = str(getattr(relay_config, "VEHICLE_ID", "A")).strip().upper()
+    if not url or not token:
+        return None
+    if vehicle_id not in ("A", "B"):
+        raise ValueError("VEHICLE_ID must be A or B")
+    return url, token, vehicle_id
+
+
+def parse_relay_url(url):
+    marker = url.find("://")
+    if marker <= 0:
+        raise ValueError("RELAY_URL must start with http:// or https://")
+    scheme = url[:marker].lower()
+    if scheme not in ("http", "https"):
+        raise ValueError("unsupported relay URL scheme")
+    remainder = url[marker + 3 :]
+    slash = remainder.find("/")
+    if slash < 0:
+        authority = remainder
+        path = "/api/vehicle/exchange"
+    else:
+        authority = remainder[:slash]
+        path = remainder[slash:] or "/api/vehicle/exchange"
+    if not authority or "@" in authority:
+        raise ValueError("invalid relay URL")
+    if ":" in authority:
+        host, port_text = authority.rsplit(":", 1)
+        port = int(port_text)
+    else:
+        host = authority
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port, path
+
+
+class RelayHttpClient:
+    def __init__(self, url, token, vehicle_id):
+        self.scheme, self.host, self.port, self.path = parse_relay_url(url)
+        self.token = token
+        self.vehicle_id = vehicle_id
+        if "\r" in token or "\n" in token:
+            raise ValueError("invalid relay token")
+        self.sock = None
+        self.buffer = bytearray()
+
+    def close(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+        self.sock = None
+        self.buffer = bytearray()
+
+    def connect(self):
+        self.close()
+        address = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM)[0][-1]
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw.settimeout(25)
+        raw.connect(address)
+        if self.scheme == "https":
+            import ssl
+
+            try:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                self.sock = context.wrap_socket(raw, server_hostname=self.host)
+            except (AttributeError, TypeError):
+                self.sock = ssl.wrap_socket(raw, server_hostname=self.host)
+        else:
+            self.sock = raw
+
+    def _write_all(self, data):
+        view = memoryview(data)
+        written = 0
+        while written < len(view):
+            if hasattr(self.sock, "write"):
+                count = self.sock.write(view[written:])
+            else:
+                count = self.sock.send(view[written:])
+            if not count:
+                raise OSError("relay socket write failed")
+            written += count
+
+    def _read_chunk(self, length=1024):
+        if hasattr(self.sock, "read"):
+            return self.sock.read(length)
+        return self.sock.recv(length)
+
+    def _read_response(self):
+        header_end = -1
+        while header_end < 0:
+            chunk = self._read_chunk()
+            if not chunk:
+                raise OSError("relay connection closed")
+            self.buffer.extend(chunk)
+            if len(self.buffer) > 16384:
+                raise OSError("relay response headers too large")
+            header_end = self.buffer.find(b"\r\n\r\n")
+        header_bytes = bytes(self.buffer[:header_end])
+        self.buffer = self.buffer[header_end + 4 :]
+        lines = header_bytes.split(b"\r\n")
+        status_fields = lines[0].split(b" ", 2)
+        if len(status_fields) < 2:
+            raise OSError("invalid relay HTTP status")
+        status_code = int(status_fields[1])
+        headers = {}
+        for line in lines[1:]:
+            if b":" in line:
+                name, value = line.split(b":", 1)
+                headers[name.strip().lower()] = value.strip()
+        if b"content-length" not in headers:
+            raise OSError("relay response missing content length")
+        content_length = int(headers[b"content-length"])
+        if content_length < 0 or content_length > RELAY_MAX_PACKET_BYTES:
+            raise OSError("invalid relay response length")
+        while len(self.buffer) < content_length:
+            chunk = self._read_chunk(min(1024, content_length - len(self.buffer)))
+            if not chunk:
+                raise OSError("relay response body closed")
+            self.buffer.extend(chunk)
+        body = bytes(self.buffer[:content_length])
+        self.buffer = self.buffer[content_length:]
+        if headers.get(b"connection", b"").lower() == b"close":
+            self.close()
+        if status_code != 200:
+            raise OSError("relay HTTP %d: %s" % (status_code, body[:120]))
+        return body
+
+    def exchange(self, upstream):
+        if self.sock is None:
+            self.connect()
+        request = (
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "User-Agent: DJY-ESP32-S3/1\r\n"
+            "Authorization: Bearer %s\r\n"
+            "X-DJY-Vehicle-ID: %s\r\n"
+            "Content-Type: application/octet-stream\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n"
+            "ngrok-skip-browser-warning: 1\r\n\r\n"
+            % (self.path, self.host, self.token, self.vehicle_id, len(upstream))
+        ).encode()
+        self._write_all(request)
+        if upstream:
+            self._write_all(upstream)
+        response = self._read_response()
+        # ngrok may acknowledge keep-alive while delaying the next request on
+        # this MicroPython TLS socket. One HTTP exchange per connection keeps
+        # ECU replies ordered and inside the server response deadline.
+        self.close()
+        return response
+
+
+def discard_uart_input(uart):
+    while uart.any():
+        uart.read(min(uart.any(), 256))
+
+
+def read_uart_response(uart, first_timeout_ms=2500, idle_timeout_ms=20):
+    response = bytearray()
+    first_deadline = time.ticks_add(time.ticks_ms(), first_timeout_ms)
+    idle_deadline = None
+    while len(response) < RELAY_MAX_PACKET_BYTES:
+        waiting = uart.any()
+        if waiting:
+            chunk = uart.read(min(waiting, 256))
+            if chunk:
+                response.extend(chunk)
+                idle_deadline = time.ticks_add(time.ticks_ms(), idle_timeout_ms)
+            continue
+        now = time.ticks_ms()
+        if response:
+            if time.ticks_diff(now, idle_deadline) >= 0:
+                break
+        elif time.ticks_diff(now, first_deadline) >= 0:
+            break
+        time.sleep_ms(1)
+    return bytes(response)
+
+
+def run_internet_relay(rapid_bike, relay_url, relay_token, vehicle_id):
+    client = RelayHttpClient(relay_url, relay_token, vehicle_id)
+    upstream = b""
+    current_baud = START_BAUD
+    retry_ms = 1000
+    last_saved_error = None
+    while True:
+        try:
+            led.set(18, 0, 22)  # Purple: server relay connected/waiting.
+            downstream = client.exchange(upstream)
+            upstream = b""
+            retry_ms = 1000
+            if not downstream:
+                continue
+            led.set(0, 0, 30)  # Blue: server command to ECU.
+            discard_uart_input(rapid_bike)
+            rapid_bike.write(downstream)
+            flush_uart(rapid_bike)
+            requested_baud = None
+            if SET_HIGH_BAUD_REQUEST in downstream:
+                requested_baud = HIGH_BAUD
+            elif SET_START_BAUD_REQUEST in downstream:
+                requested_baud = START_BAUD
+            # Map blocks are emitted by the ECU in bursts. A 20 ms gap is a
+            # valid inter-burst pause, not the end of the response. Keep the
+            # low-latency timeout for normal telemetry and allow map downloads
+            # enough quiet time to collect the complete block.
+            is_map_download = len(downstream) > 1 and downstream[1] == MAP_DOWNLOAD_COMMAND
+            upstream = read_uart_response(
+                rapid_bike,
+                first_timeout_ms=4000 if is_map_download else 2500,
+                idle_timeout_ms=350 if is_map_download else 20,
+            )
+            if requested_baud is not None and upstream and requested_baud != current_baud:
+                reinit_uart(rapid_bike, requested_baud, RAPIDBIKE_RX_PIN, RAPIDBIKE_TX_PIN)
+                current_baud = requested_baud
+                led.set(28, 18, 0)  # Amber: baud changed.
+            elif upstream:
+                led.set(0, 26, 22)  # Cyan: ECU response ready for upload.
+        except Exception as relay_error:
+            client.close()
+            error_text = repr(relay_error)
+            if error_text != last_saved_error:
+                save_fatal_error("internet_relay", relay_error)
+                last_saved_error = error_text
+            led.set(24, 0, 0)  # Red: internet retry; local firmware stays alive.
+            time.sleep_ms(retry_ms)
+            retry_ms = min(retry_ms * 2, 5000)
+
+
 class StatusLed:
     def __init__(self):
         self.devices = []
@@ -180,6 +419,10 @@ led = StatusLed()
 fatal_stage = "startup"
 
 try:
+    # Keep a short UART recovery window after reset. Sending Ctrl-C during
+    # this interval stops main.py before the production bridge detaches REPL.
+    led.set(18, 12, 0)
+    time.sleep_ms(1500)
     # Release the UART0 console before assigning its physical pins to UART2.
     # MicroPython may emit a harmless ESP-IDF warning here when UART0's driver
     # has already been released, so keep the operation guarded.
@@ -231,6 +474,7 @@ try:
     wifi_listener = None
     wifi_discovery = None
     wifi_client = None
+    wifi_mode = None
     wifi_status = b"WIFI:STARTING"
     last_error_status = load_last_error()
     try:
@@ -241,6 +485,19 @@ try:
         wifi_status = ("WIFI:ERROR:" + repr(wifi_error)).encode()
         wifi_ap = None
         wifi_listener = None
+    relay_config = load_relay_config()
+    if relay_config is not None and wifi_mode == "STA":
+        # Internet relay mode is intentionally exclusive. The ESP32 keeps one
+        # outbound HTTP/TLS connection and carries raw Rapid Bike request and
+        # response bytes through it, so no inbound port forwarding is needed.
+        for local_socket in (wifi_listener, wifi_discovery):
+            if local_socket is not None:
+                try:
+                    local_socket.close()
+                except Exception:
+                    pass
+        fatal_stage = "internet_relay"
+        run_internet_relay(rapid_bike, *relay_config)
     led.set(0, 18, 0)  # Ready: green.
     activity_until = time.ticks_ms()
 

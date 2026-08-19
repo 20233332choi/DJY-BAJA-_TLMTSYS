@@ -99,6 +99,20 @@ Rapid Bike Master와 이 앱이 동시에 ECU 명령을 보내면 응답이 섞�
 
 ESP32에 `wifi_config.py`가 설치되어 있으면 먼저 그 파일의 일반 WPA2 공유기 또는 휴대폰 핫스팟에 접속합니다. 앱은 UDP 포트 `8889`로 ESP32를 자동 발견하므로 DHCP 주소를 직접 입력할 필요가 없습니다. 저장된 Wi-Fi에 12초 이내 접속하지 못하면 위의 `RapidBike-ESP32` 자체 AP로 자동 복귀합니다. `wifi_config.py`는 비밀번호 보호를 위해 Git에서 제외됩니다.
 
+### 트랙 원격 릴레이
+
+차량이 피트 Wi-Fi 범위를 벗어나는 경우 ESP32가 차량 휴대폰 핫스팟과 LTE/5G를 통해 이 서버의 공개 HTTPS 주소로 접속할 수 있습니다.
+
+```powershell
+$env:RAPIDBIKE_LINK = "relay"
+$env:DJY_RELAY_TOKEN = "ESP32 relay_config.py와 같은 임의 토큰"
+python .\app.py
+```
+
+이 모드에서는 `/api/vehicle/exchange`가 Rapid Bike 원본 바이트를 차량과 교환하고 `127.0.0.1:8890`이 RB Master 테스트 DLL용 로컬 브리지를 제공합니다. ESP32가 연결되기 전에는 `Relay waiting/retry`, 정상 RPM 수신 중에는 `Relay live`가 표시됩니다.
+
+전체 핫스팟·토큰·ESP32 설치·RB Master 절차는 [차량 원격 무선 릴레이 매뉴얼](../../docs/wireless-relay.md)을 참고하세요.
+
 ### 실행 오류 확인
 
 | 상태 | 확인할 내용 |

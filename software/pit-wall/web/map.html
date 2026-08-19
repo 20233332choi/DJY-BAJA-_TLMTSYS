@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>DJY Live Vehicle Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
   <style>
     * { box-sizing: border-box; }
     html, body, #map { width: 100%; height: 100%; margin: 0; }
@@ -47,8 +47,15 @@
     @media (max-width: 560px) {
       .hud { top: 5px; left: 5px; right: 5px; }
       .brand span { display: none; }
+      .target-buttons { display: none; }
+      .follow-buttons { min-width: 0; max-width: 100%; overflow: hidden; }
+      .follow-buttons button[data-follow="START"],
+      .follow-buttons button[data-follow="B"],
+      .follow-buttons button[data-follow="FREE"],
+      #clear-trail { display: none; }
       .vehicle-readouts { gap: 3px; }
       .readout { min-width: 0; flex: 1; }
+      .readout.b.offline { display: none; }
       .readout strong { font-size: 14px; }
       button { height: 31px; padding: 0 7px; }
       .leaflet-control-zoom { display: none; }
@@ -64,21 +71,22 @@
       <article class="readout a offline" data-readout="A"><header><b>VEHICLE A</b><span data-value="state">OFFLINE</span></header><strong data-value="heading">--°</strong><small><span data-value="speed">--.- km/h</span> · <span data-value="accuracy">ACC --m</span> · <span data-value="laps">LAP 0</span></small></article>
       <article class="readout b offline" data-readout="B"><header><b>VEHICLE B</b><span data-value="state">OFFLINE</span></header><strong data-value="heading">--°</strong><small><span data-value="speed">--.- km/h</span> · <span data-value="accuracy">ACC --m</span> · <span data-value="laps">LAP 0</span></small></article>
     </div>
-    <div class="buttons follow-buttons"><button class="selected" data-follow="START">START</button><button data-follow="A">FOLLOW A</button><button data-follow="B">FOLLOW B</button><button data-follow="FREE">FREE</button><select id="history-lap" class="history-lap" hidden><option value="">ALL LAPS</option></select><button class="action" id="clear-trail">CLEAR</button><button class="action" id="fullscreen">FULL</button></div>
+    <div class="buttons follow-buttons"><button data-follow="START">START</button><button class="selected" data-follow="A">FOLLOW A</button><button data-follow="B">FOLLOW B</button><button data-follow="FREE">FREE</button><select id="history-lap" class="history-lap" hidden><option value="">ALL LAPS</option></select><button class="action" id="reset-view">RESET VIEW</button><button class="action" id="clear-trail">CLEAR</button><button class="action" id="fullscreen">FULL</button></div>
   </section>
   <div class="status" id="status">MAP STARTING · INTERNET REQUIRED FOR MAP TILES</div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/vendor/leaflet/leaflet.js"></script>
   <script>
     const colors = {A:'#ffff00', B:'#00ffff'};
     const trails = {A:[], B:[]};
     const armed = {A:false, B:false};
+    const latestPoints = {A:null, B:null};
     const layers = {
       A:{group:L.layerGroup(), marker:null, accuracy:null, trail:L.polyline([], {color:colors.A, weight:5, opacity:.85})},
       B:{group:L.layerGroup(), marker:null, accuracy:null, trail:L.polyline([], {color:colors.B, weight:5, opacity:.85})},
     };
     let target = 'ALL';
-    let follow = 'START';
+    let follow = 'A';
     let gateKey = '';
     let startLayers = [];
     let firstViewSet = false;
@@ -97,7 +105,7 @@
     }).addTo(map);
     tiles.on('load', () => {
       const status = document.getElementById('status');
-      if (!status.classList.contains('error')) status.textContent = 'LIVE · START FIXED · SELECT FOLLOW MODE';
+      if (!status.classList.contains('error')) status.textContent = 'LIVE · FOLLOWING VEHICLE A';
     });
     tiles.on('tileerror', () => {
       const status = document.getElementById('status');
@@ -152,6 +160,7 @@
       if (vehicle.gps_ready) armed[id] = true;
       if (vehicle.lat == null || vehicle.lon == null || !vehicle.gps_live) return;
       const point = [Number(vehicle.lat),Number(vehicle.lon)];
+      latestPoints[id] = point;
       if (!layers[id].marker) {
         layers[id].marker = L.marker(point, {icon:vehicleIcon(id,vehicle.heading), zIndexOffset:id==='A'?300:200}).addTo(layers[id].group);
         layers[id].marker.bindTooltip(`VEHICLE ${id}`, {permanent:true, direction:'bottom', offset:[0,24]});
@@ -172,7 +181,7 @@
           layers[id].trail.setLatLngs(trail);
         }
       }
-      if (!firstViewSet && !gateKey && vehicle.gps_ready) {
+      if (!firstViewSet && vehicle.gps_ready && (follow === id || !latestPoints.A)) {
         map.setView(point,18);
         firstViewSet = true;
       }
@@ -196,7 +205,7 @@
         L.polyline([center,ahead],{color:'#ffff00',weight:6,opacity:1}).addTo(map),
         L.marker(center,{icon:L.divIcon({className:'',iconAnchor:[30,-8],html:'<b class="start-label">START</b>'}),interactive:false}).addTo(map)
       );
-      if (follow==='START' || !firstViewSet) {
+      if (follow==='START') {
         map.setView(center,18);
         firstViewSet = true;
       }
@@ -306,6 +315,25 @@
       historicalLoaded = false;
       tick();
     };
+    document.getElementById('reset-view').onclick = () => {
+      const preferred = latestPoints.A ? 'A' : (latestPoints.B ? 'B' : null);
+      if (preferred) {
+        follow = preferred;
+        target = 'ALL';
+        document.querySelectorAll('[data-follow]').forEach(item => item.classList.toggle('selected',item.dataset.follow===follow));
+        document.querySelectorAll('[data-target]').forEach(item => item.classList.toggle('selected',item.dataset.target===target));
+        applyTarget();
+        map.setView(latestPoints[preferred],18,{animate:false});
+        document.getElementById('status').textContent = `VIEW RESET · FOLLOWING VEHICLE ${preferred}`;
+      } else if (gateKey) {
+        follow = 'START';
+        const parts = gateKey.split(',').map(Number);
+        map.setView([parts[0],parts[1]],18,{animate:false});
+      } else {
+        map.setView([35.14358,126.93324],17,{animate:false});
+      }
+      firstViewSet = true;
+    };
     document.getElementById('clear-trail').onclick = () => {
       for (const id of ['A','B']) { trails[id].length=0; layers[id].trail.setLatLngs([]); }
     };
@@ -317,7 +345,7 @@
       follow='FREE';
       document.querySelectorAll('[data-follow]').forEach(item => item.classList.toggle('selected',item.dataset.follow==='FREE'));
     });
-    setInterval(tick,500);
+    setInterval(tick,200);
     tick();
   </script>
 </body>

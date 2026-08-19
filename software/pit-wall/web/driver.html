@@ -407,7 +407,7 @@
       document.body.classList.add('local-mode');
       const completedNewLap = trackLocalCompletedLap(vehicle);
       const delta = vehicle.delta_s;
-      const ecuLive = localVehicleId === 'A' && telemetry && /^(USB|WiFi) live/.test(String(telemetry.status || ''));
+      const ecuLive = localVehicleId === 'A' && telemetry && /^(USB|WiFi|Relay) live/.test(String(telemetry.status || ''));
       const rpm = ecuLive ? telemetry.rpm : null;
       const throttle = ecuLive ? telemetry.throttle_percent : null;
       $('session-title').textContent = 'LOCAL GPS LAP TIMER';
@@ -798,7 +798,7 @@
       setSetupSource('speedhive');
     }
     setInterval(tick, 2000);
-    setInterval(tickLocal, 500);
+    setInterval(tickLocal, 200);
     setInterval(tickLocalFlag, 2000);
     setInterval(paintLocalCurrentLap, 100);
     setInterval(tickPitCommand, 500);

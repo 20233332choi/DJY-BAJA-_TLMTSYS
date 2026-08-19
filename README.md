@@ -61,6 +61,7 @@ cd .\firmware\esp32-s3-rapidbike\micropython\tools
 보드의 GPIO43/44는 PC USB-to-UART 통신에 사용하고 GPIO17/18은 Rapid Bike 통신에 사용합니다. Octal Flash/PSRAM 모델에서는 GPIO35~37이 내부 메모리에 사용될 수 있으므로 외부 배선에 사용하지 않습니다.
 
 - [상세 배선·LED·복구 매뉴얼](docs/hardware/README.md)
+- [차량 원격 무선 릴레이 매뉴얼](docs/wireless-relay.md)
 - [ESP32-S3 DevKit 전체 PDF](docs/hardware/esp32-s3-devkitc-1-user-guide.pdf)
 - [ESP32-S3 핀 배치 이미지](docs/images/hardware/esp32_s3_pin_layout.png)
 
@@ -75,6 +76,8 @@ cd .\firmware\esp32-s3-rapidbike\micropython\tools
 | TCP 데이터 포트 | `8888` |
 | UDP 검색 포트 | `8889` |
 | PC 대시보드 | `http://127.0.0.1:8765/` |
+| 차량 HTTPS 릴레이 | `/api/vehicle/exchange` |
+| RB Master 로컬 릴레이 | `127.0.0.1:8890` |
 
 AP 비밀번호는 펌웨어 소스에 정의되어 있습니다. 실제 운용 전에는 팀 전용 비밀번호로 변경하세요. 일반 공유기나 휴대폰 핫스팟 접속 정보는 `wifi_config.py`에 저장하며 Git에 포함하지 않습니다.
 
