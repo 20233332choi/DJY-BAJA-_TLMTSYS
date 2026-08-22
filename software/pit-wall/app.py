@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import hmac
 import json
 import ipaddress
 import math
@@ -12,6 +13,7 @@ import queue
 import re
 import socket
 import sqlite3
+import struct
 import subprocess
 import threading
 import time
@@ -44,6 +46,11 @@ SPEEDHIVE_FLAG_NAMES = {
 
 RPM_REQUEST = bytes.fromhex("AA DA 55 D9")
 STATUS_REQUEST = bytes.fromhex("AA 21 55 20")
+ECU_INIT_SEQUENCE = (
+    (bytes.fromhex("AA 35 55 34"), 1),
+    (bytes.fromhex("AA 2F 55 2E"), 2),
+    (bytes.fromhex("AA 47 55 00 46"), 23),
+)
 TPS_INDEX_TO_PERCENT = {1: 0, 2: 5, 3: 10, 4: 20, 5: 40, 6: 60, 7: 80, 8: 95}
 
 FT_OK = 0
@@ -56,6 +63,11 @@ RAPIDBIKE_WIFI_PORT = int(os.environ.get("RAPIDBIKE_WIFI_PORT", "8888"))
 RAPIDBIKE_DISCOVERY_PORT = 8889
 RAPIDBIKE_DISCOVERY_REQUEST = b"RAPIDBIKE_DISCOVER_V1"
 RAPIDBIKE_LINK = os.environ.get("RAPIDBIKE_LINK", "auto").strip().lower()
+DJY_RELAY_TOKEN = os.environ.get("DJY_RELAY_TOKEN", "").strip()
+RELAY_LONG_POLL_SECONDS = 15.0
+RELAY_MAX_PACKET_BYTES = 65536
+RELAY_LOCAL_PORT = int(os.environ.get("DJY_RELAY_LOCAL_PORT", "8890"))
+RELAY_RAW_TAKEOVER_SETTLE_SECONDS = 2.0
 
 
 @dataclass
@@ -208,6 +220,176 @@ class SharedState:
             self.state.recording = recording
             self.state.session_id = session_id
             self.state.session_name = session_name
+
+
+@dataclass
+class VehicleRelayChannel:
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    uplink: bytearray = field(default_factory=bytearray)
+    downlink: bytearray = field(default_factory=bytearray)
+    connected_at: float = 0.0
+    last_seen: float = 0.0
+    remote_address: str = ""
+    exchange_count: int = 0
+    uplink_bytes: int = 0
+    downlink_bytes: int = 0
+    raw_client_active: bool = False
+    raw_client_hold_until: float = 0.0
+
+
+class VehicleRelay:
+    """Half-duplex request/response tunnel for an outbound ESP32 connection."""
+
+    def __init__(self) -> None:
+        self.channels = {vehicle_id: VehicleRelayChannel() for vehicle_id in ("A", "B")}
+
+    def exchange(
+        self,
+        vehicle_id: str,
+        upstream: bytes,
+        remote_address: str,
+        timeout: float = RELAY_LONG_POLL_SECONDS,
+    ) -> bytes:
+        vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        channel = self.channels[vehicle_id]
+        now = time.time()
+        with channel.condition:
+            if not channel.last_seen or now - channel.last_seen > timeout + 5:
+                channel.connected_at = now
+                channel.uplink.clear()
+                channel.downlink.clear()
+            channel.last_seen = now
+            channel.remote_address = remote_address
+            channel.exchange_count += 1
+            if upstream:
+                channel.uplink.extend(upstream)
+                channel.uplink_bytes += len(upstream)
+                channel.condition.notify_all()
+            deadline = time.monotonic() + timeout
+            while not channel.downlink:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return b""
+                channel.condition.wait(remaining)
+            result = bytes(channel.downlink[:RELAY_MAX_PACKET_BYTES])
+            del channel.downlink[: len(result)]
+            channel.downlink_bytes += len(result)
+            return result
+
+    def request(
+        self,
+        vehicle_id: str,
+        payload: bytes,
+        expected: int,
+        timeout: float,
+    ) -> bytes:
+        vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        if not payload:
+            raise ValueError("relay request payload is empty")
+        if expected <= 0 or expected > RELAY_MAX_PACKET_BYTES:
+            raise ValueError("invalid relay response length")
+        channel = self.channels[vehicle_id]
+        with channel.condition:
+            if time.time() - channel.last_seen > RELAY_LONG_POLL_SECONDS + 5:
+                raise ConnectionError(f"vehicle {vehicle_id} relay is offline")
+            if channel.raw_client_active or time.monotonic() < channel.raw_client_hold_until:
+                raise ConnectionError(
+                    f"vehicle {vehicle_id} is controlled by the raw relay client"
+                )
+            channel.uplink.clear()
+            channel.downlink.extend(payload)
+            channel.condition.notify_all()
+            deadline = time.monotonic() + timeout
+            while len(channel.uplink) < expected:
+                if channel.raw_client_active or time.monotonic() < channel.raw_client_hold_until:
+                    channel.downlink.clear()
+                    raise ConnectionError(
+                        f"vehicle {vehicle_id} was taken over by the raw relay client"
+                    )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    received = len(channel.uplink)
+                    channel.uplink.clear()
+                    channel.downlink.clear()
+                    raise TimeoutError(
+                        f"vehicle {vehicle_id} response timeout "
+                        f"({received}/{expected})"
+                    )
+                channel.condition.wait(remaining)
+            result = bytes(channel.uplink[:expected])
+            del channel.uplink[:expected]
+            return result
+
+    def transact(self, vehicle_id: str, payload: bytes, timeout: float = 5.0) -> bytes:
+        """Send one raw request and return the next complete ESP32 uplink packet."""
+        vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        if not payload:
+            raise ValueError("relay transaction payload is empty")
+        if len(payload) > RELAY_MAX_PACKET_BYTES:
+            raise ValueError("relay transaction payload is too large")
+        channel = self.channels[vehicle_id]
+        with channel.condition:
+            if time.time() - channel.last_seen > RELAY_LONG_POLL_SECONDS + 5:
+                raise ConnectionError(f"vehicle {vehicle_id} relay is offline")
+            channel.uplink.clear()
+            channel.downlink.extend(payload)
+            channel.condition.notify_all()
+            deadline = time.monotonic() + timeout
+            while not channel.uplink:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    channel.downlink.clear()
+                    raise TimeoutError(f"vehicle {vehicle_id} raw response timeout")
+                channel.condition.wait(remaining)
+            result = bytes(channel.uplink[:RELAY_MAX_PACKET_BYTES])
+            del channel.uplink[: len(result)]
+            return result
+
+    def set_raw_client_active(self, vehicle_id: str, active: bool) -> None:
+        vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        channel = self.channels[vehicle_id]
+        with channel.condition:
+            channel.raw_client_active = active
+            if active:
+                channel.raw_client_hold_until = 0.0
+                channel.uplink.clear()
+                channel.downlink.clear()
+            else:
+                # RB Master closes and reopens the FTDI handle between device
+                # discovery and map download. Keep automatic telemetry out of
+                # that millisecond-sized gap so its request cannot be consumed
+                # as the first response of the new raw session.
+                channel.raw_client_hold_until = time.monotonic() + 2.0
+            channel.condition.notify_all()
+
+    def raw_client_active(self, vehicle_id: str) -> bool:
+        vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        channel = self.channels[vehicle_id]
+        with channel.condition:
+            return channel.raw_client_active or time.monotonic() < channel.raw_client_hold_until
+
+    def status(self) -> dict[str, Any]:
+        now = time.time()
+        result: dict[str, Any] = {"server_time": now, "token_configured": bool(DJY_RELAY_TOKEN), "vehicles": {}}
+        for vehicle_id, channel in self.channels.items():
+            with channel.condition:
+                age = now - channel.last_seen if channel.last_seen else None
+                result["vehicles"][vehicle_id] = {
+                    "online": age is not None and age <= RELAY_LONG_POLL_SECONDS + 5,
+                    "age_s": age,
+                    "connected_at": channel.connected_at or None,
+                    "remote_address": channel.remote_address,
+                    "exchange_count": channel.exchange_count,
+                    "uplink_bytes": channel.uplink_bytes,
+                    "downlink_bytes": channel.downlink_bytes,
+                    "queued_up": len(channel.uplink),
+                    "queued_down": len(channel.downlink),
+                    "raw_client_active": (
+                        channel.raw_client_active
+                        or time.monotonic() < channel.raw_client_hold_until
+                    ),
+                }
+        return result
 
 
 class SpeedhiveError(RuntimeError):
@@ -557,6 +739,173 @@ class WifiWorker(threading.Thread):
                     except OSError:
                         pass
                     self.sock = None
+
+
+class RelayWorker(threading.Thread):
+    def __init__(
+        self,
+        state: SharedState,
+        db_queue: queue.Queue[tuple[float, TelemetryState]],
+        relay: VehicleRelay,
+        vehicle_id: str = "A",
+    ):
+        super().__init__(daemon=True)
+        self.state = state
+        self.db_queue = db_queue
+        self.relay = relay
+        self.vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        self.stop_event = threading.Event()
+
+    def run(self) -> None:
+        close_rbmaster()
+        if not DJY_RELAY_TOKEN:
+            self.state.update_status("ERROR: DJY_RELAY_TOKEN is not configured")
+            return
+        initialized = False
+        voltage = self.state.latest().battery_voltage
+        next_voltage_poll = 0.0
+        while not self.stop_event.is_set():
+            if self.relay.raw_client_active(self.vehicle_id):
+                initialized = False
+                self.state.update_status(f"Relay RB Master vehicle {self.vehicle_id}")
+                self.stop_event.wait(0.2)
+                continue
+            try:
+                if not initialized:
+                    self.state.update_status(f"Relay initializing vehicle {self.vehicle_id}")
+                    for request, expected in ECU_INIT_SEQUENCE:
+                        self.relay.request(
+                            self.vehicle_id,
+                            request,
+                            expected=expected,
+                            timeout=3.5,
+                        )
+                    initialized = True
+                if self.state.latest().usb_status != "Relay live":
+                    self.state.update_status(f"Relay waiting vehicle {self.vehicle_id}")
+                data = self.relay.request(
+                    self.vehicle_id,
+                    RPM_REQUEST,
+                    expected=24,
+                    timeout=2.5,
+                )
+                decoded = decode_frame(data)
+                if decoded is None:
+                    raise RuntimeError(f"invalid relay RPM response ({len(data)} bytes)")
+                rpm, throttle, fuel_add = decoded
+                self.state.update_ecu(
+                    rpm,
+                    throttle,
+                    fuel_add,
+                    data.hex(" ").upper(),
+                    "Relay",
+                    voltage,
+                )
+                snapshot = self.state.latest()
+                if snapshot.recording:
+                    self.db_queue.put((time.time(), snapshot))
+                now = time.monotonic()
+                if now >= next_voltage_poll:
+                    status_data = self.relay.request(
+                        self.vehicle_id,
+                        STATUS_REQUEST,
+                        expected=6,
+                        timeout=2.5,
+                    )
+                    voltage = decode_status_voltage(status_data)
+                    self.state.update_ecu(
+                        rpm,
+                        throttle,
+                        fuel_add,
+                        data.hex(" ").upper(),
+                        "Relay",
+                        voltage,
+                    )
+                    next_voltage_poll = time.monotonic() + 10.0
+                self.stop_event.wait(0.02)
+            except (TimeoutError, ConnectionError, RuntimeError, ValueError) as exc:
+                initialized = False
+                self.state.update_status(f"Relay retry: {exc}")
+                self.stop_event.wait(1.0)
+
+
+class RelayTcpBridge(threading.Thread):
+    """Loopback-only framed TCP bridge used by the RB Master D2XX shim."""
+
+    def __init__(self, relay: VehicleRelay, vehicle_id: str = "A", port: int = RELAY_LOCAL_PORT):
+        super().__init__(daemon=True)
+        self.relay = relay
+        self.vehicle_id = validate_lap_vehicle_id(vehicle_id)
+        self.port = port
+        self.stop_event = threading.Event()
+        self.ready_event = threading.Event()
+        self.listener: socket.socket | None = None
+
+    @staticmethod
+    def _read_exact(client: socket.socket, length: int) -> bytes:
+        data = bytearray()
+        while len(data) < length:
+            chunk = client.recv(length - len(data))
+            if not chunk:
+                raise ConnectionError("local relay client closed")
+            data.extend(chunk)
+        return bytes(data)
+
+    def run(self) -> None:
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listener.bind(("127.0.0.1", self.port))
+        self.port = self.listener.getsockname()[1]
+        self.listener.listen(1)
+        self.listener.settimeout(0.5)
+        self.ready_event.set()
+        while not self.stop_event.is_set():
+            try:
+                client, _ = self.listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                if self.stop_event.is_set():
+                    break
+                continue
+            self.relay.set_raw_client_active(self.vehicle_id, True)
+            try:
+                client.settimeout(10.0)
+                # An automatic telemetry command can already be at the ECU
+                # when the raw client takes ownership. Its late response must
+                # not become RB Master's first FTDI response. Hold ownership,
+                # let that transaction drain, then clear the channel once more
+                # before consuming the first raw request queued by the client.
+                if self.stop_event.wait(RELAY_RAW_TAKEOVER_SETTLE_SECONDS):
+                    break
+                self.relay.set_raw_client_active(self.vehicle_id, True)
+                while not self.stop_event.is_set():
+                    header = self._read_exact(client, 4)
+                    request_length = struct.unpack("<I", header)[0]
+                    if request_length <= 0 or request_length > RELAY_MAX_PACKET_BYTES:
+                        raise ValueError("invalid local relay frame length")
+                    request = self._read_exact(client, request_length)
+                    try:
+                        response = self.relay.transact(self.vehicle_id, request, timeout=8.0)
+                    except (TimeoutError, ConnectionError):
+                        response = b""
+                    client.sendall(struct.pack("<I", len(response)) + response)
+            except (OSError, TimeoutError, ConnectionError, ValueError):
+                pass
+            finally:
+                self.relay.set_raw_client_active(self.vehicle_id, False)
+                try:
+                    client.close()
+                except OSError:
+                    pass
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.listener is not None:
+            try:
+                self.listener.close()
+            except OSError:
+                pass
 
 
 class UsbWorker(threading.Thread):
@@ -1300,17 +1649,30 @@ def make_handler(
     speedhive: SpeedhiveClient,
     lap_timing: LapTimingManager,
     pit_commands: PitCommandManager,
+    vehicle_relay: VehicleRelay,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def _send(self, code: int, body: bytes, content_type: str = "text/plain; charset=utf-8") -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
         def _json(self, payload: Any, code: int = 200) -> None:
             self._send(code, json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+        def _relay_authorized(self) -> bool:
+            if not DJY_RELAY_TOKEN:
+                return False
+            authorization = self.headers.get("Authorization", "")
+            supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+            if not supplied:
+                supplied = self.headers.get("X-DJY-Relay-Token", "")
+            return hmac.compare_digest(supplied, DJY_RELAY_TOKEN)
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -1332,8 +1694,24 @@ def make_handler(
             if parsed.path == "/djy.css":
                 self._send(200, read_file("djy.css"), "text/css; charset=utf-8")
                 return
+            vendor_files = {
+                "/vendor/leaflet/leaflet.css": ("vendor/leaflet/leaflet.css", "text/css; charset=utf-8"),
+                "/vendor/leaflet/leaflet.js": ("vendor/leaflet/leaflet.js", "text/javascript; charset=utf-8"),
+                "/vendor/leaflet/images/layers.png": ("vendor/leaflet/images/layers.png", "image/png"),
+                "/vendor/leaflet/images/layers-2x.png": ("vendor/leaflet/images/layers-2x.png", "image/png"),
+                "/vendor/leaflet/images/marker-icon.png": ("vendor/leaflet/images/marker-icon.png", "image/png"),
+                "/vendor/leaflet/images/marker-icon-2x.png": ("vendor/leaflet/images/marker-icon-2x.png", "image/png"),
+                "/vendor/leaflet/images/marker-shadow.png": ("vendor/leaflet/images/marker-shadow.png", "image/png"),
+            }
+            if parsed.path in vendor_files:
+                filename, content_type = vendor_files[parsed.path]
+                self._send(200, read_file(filename), content_type)
+                return
             if parsed.path == "/api/latest":
                 self._json(latest_payload(state.latest()))
+                return
+            if parsed.path == "/api/vehicle/relay-status":
+                self._json(vehicle_relay.status())
                 return
             if parsed.path == "/api/lap/status":
                 self._json(lap_timing.payload())
@@ -1400,7 +1778,33 @@ def make_handler(
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self._send(400, b"invalid content length")
+                return
+            if length < 0 or length > 1024 * 1024:
+                self._send(413, b"request body too large")
+                return
+            if parsed.path == "/api/vehicle/exchange":
+                if not self._relay_authorized():
+                    self._send(401, b"relay authentication required")
+                    return
+                if length > RELAY_MAX_PACKET_BYTES:
+                    self._send(413, b"relay packet too large")
+                    return
+                upstream = self.rfile.read(length) if length else b""
+                try:
+                    vehicle_id = validate_lap_vehicle_id(self.headers.get("X-DJY-Vehicle-ID", "A"))
+                    downstream = vehicle_relay.exchange(
+                        vehicle_id,
+                        upstream,
+                        self.client_address[0],
+                    )
+                    self._send(200, downstream, "application/octet-stream")
+                except ValueError as exc:
+                    self._json({"error": str(exc)}, 400)
+                return
             body = self.rfile.read(length) if length else b"{}"
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}
@@ -1497,11 +1901,16 @@ def make_handler(
 
 
 def latest_payload(s: TelemetryState) -> dict[str, Any]:
-    gps_age = time.time() - s.gps.ts if s.gps.ts else None
+    now = time.time()
+    gps_age = now - s.gps.ts if s.gps.ts else None
     speed = s.gps.speed_kmh if gps_age is not None and gps_age < 5 else None
-    motion_age = time.time() - s.motion.ts if s.motion.ts else None
+    motion_age = now - s.motion.ts if s.motion.ts else None
+    ecu_age = now - s.usb_ts if s.usb_ts else None
     motion_live = motion_age is not None and motion_age < 2
     return {
+        "server_time": now,
+        "ecu_ts": s.usb_ts or None,
+        "ecu_age_s": ecu_age,
         "rpm": s.rpm,
         "battery_voltage": s.battery_voltage,
         "speed_kmh": speed,
@@ -1741,6 +2150,7 @@ def logs_payload(
 
 class SingleInstanceHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
+    daemon_threads = True
 
 
 def main() -> int:
@@ -1749,12 +2159,17 @@ def main() -> int:
     speedhive = SpeedhiveClient()
     lap_timing = LapTimingManager(db)
     pit_commands = PitCommandManager()
+    vehicle_relay = VehicleRelay()
     db_queue: queue.Queue[tuple[float, TelemetryState]] = queue.Queue()
     stop_event = threading.Event()
+    relay_tcp_bridge: RelayTcpBridge | None = None
     if RAPIDBIKE_LINK == "wifi":
-        ecu_worker: UsbWorker | WifiWorker = WifiWorker(state, db_queue)
+        ecu_worker: UsbWorker | WifiWorker | RelayWorker = WifiWorker(state, db_queue)
     elif RAPIDBIKE_LINK == "usb":
         ecu_worker = UsbWorker(state, db_queue)
+    elif RAPIDBIKE_LINK == "relay":
+        ecu_worker = RelayWorker(state, db_queue, vehicle_relay)
+        relay_tcp_bridge = RelayTcpBridge(vehicle_relay)
     elif RAPIDBIKE_LINK == "auto":
         endpoint = discover_rapidbike(timeout=0.35)
         if endpoint is not None:
@@ -1762,18 +2177,28 @@ def main() -> int:
         else:
             ecu_worker = UsbWorker(state, db_queue)
     else:
-        raise ValueError("RAPIDBIKE_LINK must be auto, wifi, or usb")
+        raise ValueError("RAPIDBIKE_LINK must be auto, wifi, usb, or relay")
     writer = DbWriter(db, db_queue, stop_event)
-    server = SingleInstanceHTTPServer(("0.0.0.0", 8765), make_handler(state, db, speedhive, lap_timing, pit_commands))
+    server = SingleInstanceHTTPServer(
+        ("0.0.0.0", 8765),
+        make_handler(state, db, speedhive, lap_timing, pit_commands, vehicle_relay),
+    )
     ecu_worker.start()
+    if relay_tcp_bridge is not None:
+        relay_tcp_bridge.start()
     writer.start()
     print("DJY Baja app: http://127.0.0.1:8765/")
+    if RAPIDBIKE_LINK == "relay":
+        print("Vehicle relay: /api/vehicle/exchange")
+        print(f"RB Master local relay: 127.0.0.1:{RELAY_LOCAL_PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         ecu_worker.stop_event.set()
+        if relay_tcp_bridge is not None:
+            relay_tcp_bridge.stop()
         stop_event.set()
         server.shutdown()
     return 0

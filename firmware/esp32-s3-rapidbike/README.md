@@ -2,7 +2,7 @@
 
 ## 운영 버전
 
-현재 실제 보드에서 사용하는 애플리케이션은 [`micropython/main.py`](micropython/main.py)입니다. PC USB-UART와 Rapid Bike TTL UART 사이의 유선 브리지, Wi-Fi TCP 브리지, UDP 자동 검색, 상태 LED 및 오류 기록을 제공합니다.
+현재 실제 보드에서 사용하는 애플리케이션은 [`micropython/main.py`](micropython/main.py)입니다. PC USB-UART와 Rapid Bike TTL UART 사이의 유선 브리지, Wi-Fi TCP 브리지, UDP 자동 검색, 휴대폰 핫스팟을 통한 HTTPS 원격 릴레이, 상태 LED 및 오류 기록을 제공합니다.
 
 ```text
 esp32-s3-rapidbike/
@@ -39,6 +39,12 @@ cd .\firmware\esp32-s3-rapidbike\micropython\tools
 .\install_wired_bridge.ps1 -Port COM8 -IncludeWifiConfig
 ```
 
+원격 릴레이 설정도 함께 설치하려면:
+
+```powershell
+.\install_wired_bridge.ps1 -Port COM8 -IncludeWifiConfig -IncludeRelayConfig
+```
+
 ## MicroPython 기본 이미지 복구
 
 `BOOT`을 누른 채 `RST/EN`을 눌렀다 놓고, `BOOT`을 놓아 다운로드 모드로 진입합니다.
@@ -60,6 +66,8 @@ SPIRAM용 공식 MicroPython v1.28.0 이미지입니다.
 ## Wi-Fi 설정
 
 [`micropython/config/wifi_config.example.py`](micropython/config/wifi_config.example.py)를 `wifi_config.py`로 복사한 뒤 실제 SSID와 비밀번호를 입력합니다. `wifi_config.py`는 Git에서 제외됩니다.
+
+인터넷 원격 릴레이는 [`micropython/config/relay_config.example.py`](micropython/config/relay_config.example.py)를 `relay_config.py`로 복사해 고정 HTTPS 주소, 공통 토큰, 차량 ID를 설정합니다. 전체 절차는 [원격 무선 릴레이 매뉴얼](../../docs/wireless-relay.md)을 참고하세요.
 
 ## Arduino 대안
 

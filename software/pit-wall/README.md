@@ -1,6 +1,13 @@
 # 대자연 DJY Baja Pit Wall
 
+> **🏁 실전 검증 완료 (Field-Verified)**
+> 
+> 실제 대회 현장에서 텔레메트리 수신, 드라이버 HUD 및 피트월 랩타이밍 실전 운용을 완료했습니다.  
+> **현재 시스템은 보조 ECU(Rapid Bike EVO)로부터의 실시간 정보 수신 및 모니터링(Read-Only) 전용으로 안전하게 동작합니다.**
+
 대자연 DJY Baja 차량용 피트월 대시보드입니다. Rapid Bike EVO USB와 iPhone GPS를 함께 받아 표시하고 저장합니다.
+
+![대회장 실제 운용 모습](../../docs/images/dashboard/field_operation_1.jpg)
 
 저장소 루트에서 이 프로그램 폴더로 이동한 뒤 실행합니다.
 
@@ -99,6 +106,20 @@ Rapid Bike Master와 이 앱이 동시에 ECU 명령을 보내면 응답이 섞�
 
 ESP32에 `wifi_config.py`가 설치되어 있으면 먼저 그 파일의 일반 WPA2 공유기 또는 휴대폰 핫스팟에 접속합니다. 앱은 UDP 포트 `8889`로 ESP32를 자동 발견하므로 DHCP 주소를 직접 입력할 필요가 없습니다. 저장된 Wi-Fi에 12초 이내 접속하지 못하면 위의 `RapidBike-ESP32` 자체 AP로 자동 복귀합니다. `wifi_config.py`는 비밀번호 보호를 위해 Git에서 제외됩니다.
 
+### 트랙 원격 릴레이
+
+차량이 피트 Wi-Fi 범위를 벗어나는 경우 ESP32가 차량 휴대폰 핫스팟과 LTE/5G를 통해 이 서버의 공개 HTTPS 주소로 접속할 수 있습니다.
+
+```powershell
+$env:RAPIDBIKE_LINK = "relay"
+$env:DJY_RELAY_TOKEN = "ESP32 relay_config.py와 같은 임의 토큰"
+python .\app.py
+```
+
+이 모드에서는 `/api/vehicle/exchange`가 Rapid Bike 원본 바이트를 차량과 교환하고 `127.0.0.1:8890`이 RB Master 테스트 DLL용 로컬 브리지를 제공합니다. ESP32가 연결되기 전에는 `Relay waiting/retry`, 정상 RPM 수신 중에는 `Relay live`가 표시됩니다.
+
+전체 핫스팟·토큰·ESP32 설치·RB Master 절차는 [차량 원격 무선 릴레이 매뉴얼](../../docs/wireless-relay.md)을 참고하세요.
+
 ### 실행 오류 확인
 
 | 상태 | 확인할 내용 |
@@ -150,6 +171,10 @@ http://127.0.0.1:8765/
 ```
 
 피트 A/B 통합 화면에서는 `A/B GPS LAP`, `SPEEDHIVE`, `ECU DASHBOARD`, `RUN CONTROL` 탭으로 기존 기능에 접근할 수 있습니다. 기존 `/timing`, `/lap-timing`, `/map`, `/vehicle`, `/dashboard` 주소도 직접 사용할 수 있습니다.
+
+| 피트 통합 랩타이밍 대시보드 (View 1) | 피트 텔레메트리 & 맵 모니터 (View 2) |
+|:---:|:---:|
+| ![피트 대시보드 1](../../docs/images/dashboard/pit_dashboard_1.jpg) | ![피트 대시보드 2](../../docs/images/dashboard/pit_dashboard_2.jpg) |
 
 ## 2대 GPS 자체 랩타이밍
 
@@ -218,6 +243,8 @@ http://127.0.0.1:8765/driver
 차량별 LOCAL GPS 화면을 바로 열려면 `/driver?source=local&vehicle=A` 또는 `/driver?source=local&vehicle=B`를 사용할 수 있습니다.
 
 LOCAL GPS 드라이버 화면은 F1 스티어링 휠처럼 주행 중 즉시 읽을 값의 우선순위를 높여 중앙에 GPS 속도, 상단에 12칸 RPM 시프트 라이트와 숫자 RPM, 좌우에 축소된 LAST/CURRENT LAP을 배치합니다. RapidBike USB RPM과 스로틀은 현재 차량 A에만 연결되므로 차량 B에서는 `RPM ----`, `THROTTLE --`로 표시합니다. 차량 B에 별도 ECU 입력을 추가하기 전까지 차량 A의 엔진 값을 B에 대입하지 않습니다.
+
+![차량 드라이버 HUD 화면](../../docs/images/dashboard/driver_dashboard.jpg)
 
 피트 월의 `/timing`과 `/lap-timing` 화면에서는 `ALL / A / B`로 열람 차량과 명령 송신 차량을 한 번에 선택합니다. `ALL`은 A/B 정보를 함께 표시하고 두 드라이버에게 보내며, `A` 또는 `B`는 선택 차량 정보만 표시하고 해당 드라이버에게만 보냅니다. `GREEN`, `YELLOW`, `RED`, `STOP`, `BOX THIS LAP`을 수동 전송할 수 있고 `CLEAR`로 선택 대상의 경고를 해제합니다. `RED`, `YELLOW`, `STOP`은 드라이버 화면에 지속되는 전체화면 경고이고, `BOX THIS LAP`은 5초간 점멸한 뒤 상단 배지에 남습니다. 새 랩의 델타 전체화면에는 해당 `LAP` 번호도 같이 표시됩니다.
 

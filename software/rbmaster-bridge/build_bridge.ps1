@@ -15,6 +15,7 @@ $compilerArgs = @(
     '-o'
     $output
     $source
+    '-lws2_32'
 )
 & i686-w64-mingw32-gcc.exe @compilerArgs
 if ($LASTEXITCODE -ne 0) { throw "bridge build failed: $LASTEXITCODE" }

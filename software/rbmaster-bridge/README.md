@@ -5,6 +5,11 @@ device to RB Master and translates the commonly used FTDI calls to a Windows COM
 port. It defaults to `COM8`; set `RB_ESP32_COM` before launching RB Master to use
 another port.
 
+For the internet vehicle relay, set `RB_ESP32_RELAY=127.0.0.1:8890`. In that
+mode the DLL uses the pit-wall server's loopback TCP bridge instead of a COM
+port. Frames are length-prefixed locally and remain raw Rapid Bike bytes across
+the HTTPS vehicle tunnel.
+
 The installed Dimsport software and driver files are not modified. The build
 script writes the experimental DLL and smoke-test executable to the local
 `build/` directory. Copy them manually to a disposable RB Master test directory
