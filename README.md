@@ -1,6 +1,19 @@
 # DJY Baja Telemetry System
 
+> **🏁 실전 검증 완료 (Field-Verified)**
+> 
+> 실제 K-Baja 대회 현장에서 차량 텔레메트리, iPhone GPS 랩타이밍 및 피트월 시스템의 실전 검증을 완료했습니다.  
+> **현재 시스템은 보조 ECU(Rapid Bike)로부터의 실시간 데이터 수신 및 모니터링(Read-Only)을 지원합니다.** (RPM, TPS, 연료 보정값, 배터리 전압 수신 전용)
+
 DJY Baja 차량의 Rapid Bike ECU 데이터, iPhone GPS/IMU, 랩타이밍을 한곳에서 수집하고 표시하는 텔레메트리 프로젝트입니다. ESP32-S3 펌웨어와 Windows 피트월 소프트웨어를 서로 독립적으로 관리할 수 있도록 분리했습니다.
+
+## 시스템 화면 및 운용 모습
+
+| 대회장 실제 운용 모습 | 차량 드라이버 HUD 화면 |
+|:---:|:---:|
+| ![대회장 실제 운용](docs/images/dashboard/field_operation_1.jpg) | ![드라이버 대시보드](docs/images/dashboard/driver_dashboard.jpg) |
+| **피트 통합 랩타이밍 & 텔레메트리 대시보드 (View 1)** | **피트 통합 랩타이밍 & 텔레메트리 대시보드 (View 2)** |
+| ![피트 대시보드 1](docs/images/dashboard/pit_dashboard_1.jpg) | ![피트 대시보드 2](docs/images/dashboard/pit_dashboard_2.jpg) |
 
 ## 프로젝트 구성
 
@@ -17,7 +30,7 @@ DJY-BAJA-_TLMTSYS/
 │  └─ rbmaster-tools/             # 진단 스크립트
 ├─ docs/
 │  ├─ hardware/                   # 배선 매뉴얼과 Espressif PDF
-│  └─ images/                     # 핀맵 및 진단 화면
+│  └─ images/                     # 핀맵, 진단 화면, 대시보드 스크린샷
 └─ .local/                        # 제조사 프로그램·DLL 등 로컬 전용 파일(Git 제외)
 ```
 
