@@ -34,12 +34,17 @@
     .lap-panel-head b { color: #ddd; }
     .lap-table { width: 100%; min-width: 630px; border-collapse: collapse; }
     .lap-table th, .lap-table td { padding: 7px 9px; border-bottom: 1px solid #171717; text-align: right; font: 10px Consolas, monospace; white-space: nowrap; }
+    .lap-table tr.clickable { cursor: pointer; transition: background .12s; }
+    .lap-table tr.clickable:hover { background: #141414; }
+    .lap-table tr.active { background: #0b1f13 !important; border-left: 3px solid #25e58d; }
     .lap-table th:first-child, .lap-table td:first-child { text-align: left; }
     .lap-table th { color: var(--muted); font-weight: 400; }
     .lap-table td { color: #ccc; }
     .lap-table .lap-number { color: var(--amber); font-weight: 800; }
-    .lap-track { color: var(--blue); text-decoration: none; }
-    .lap-track:hover { text-decoration: underline; }
+    .lap-track { color: var(--blue); text-decoration: none; font-weight: bold; }
+    .lap-track:hover { text-decoration: underline; color: #fff; }
+    .lap-reset-btn { height: 22px; padding: 0 7px; border: 1px solid #555; background: #111; color: #00ffff; font: 9px Consolas, monospace; cursor: pointer; border-radius: 2px; }
+    .lap-reset-btn:hover { background: #222; border-color: #00ffff; }
     .chart-panel { min-height: 0; position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); background: #020202; }
     .chart-head { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font: 10px Consolas, monospace; }
     .trace-controls, .series-toggles, .zoom-controls { display: flex; align-items: center; gap: 5px; }
@@ -131,7 +136,11 @@
     let selectedId = null;
     let selectedSession = null;
     let selectedVehicle = 'A';
+    let allSessionRows = [];
+    let allSessionSummary = null;
     let currentRows = [];
+    let currentLaps = [];
+    let selectedLap = null;
     let loadedSignature = '';
     let displayedSessionId = null;
     let runFirstTs = null;
@@ -226,6 +235,7 @@
     async function selectSession(id) {
       selectedId = id;
       selectedSession = sessions.find(s => s.id === id) || null;
+      selectedLap = null;
       loadedSignature = '';
       history.replaceState(null, '', `/logs?session=${id}`);
       renderSessions();
@@ -238,7 +248,11 @@
       const data = await fetch(`/api/logs?session_id=${selectedId}&vehicle_id=${selectedVehicle}&limit=10000`, {cache:'no-store'}).then(r => r.json());
       const lapData = await fetch(`/api/laps?session_id=${selectedId}&vehicle_id=${selectedVehicle}`, {cache:'no-store'}).then(r => r.json());
       const summary = data.summary;
-      currentRows = data.rows.slice().reverse();
+      allSessionRows = data.rows.slice().reverse();
+      currentRows = allSessionRows.slice();
+      allSessionSummary = summary;
+      currentLaps = lapData.laps || [];
+      selectedLap = null;
       runFirstTs = summary.first_ts;
       if (displayedSessionId !== selectedId) resetZoom();
       displayedSessionId = selectedId;
@@ -246,9 +260,10 @@
       $('run-meta').textContent = `${dateText(selectedSession.start_ts)} · ${selectedSession.end_ts == null ? 'RECORDING NOW' : 'RUN COMPLETE'}`;
       $('detail-heading').textContent = `GPS ${selectedVehicle} / IMU / ECU`;
       $('track-link').href = `/map?session=${selectedSession.id}&vehicle_id=${selectedVehicle}`;
+      $('track-link').textContent = 'TRACK MAP ↗';
       $('track-link').hidden = false;
       
-      const lapCount = lapData.laps ? lapData.laps.filter(l => l.lap_number > 0).length : 0;
+      const lapCount = currentLaps.filter(l => l.lap_number > 0).length;
       $('samples').textContent = summary.samples ? Number(summary.samples).toLocaleString() : (lapCount ? `${lapCount} Laps` : '0');
       
       const duration = durationParts(selectedSession.start_ts, selectedSession.end_ts);
@@ -258,15 +273,58 @@
       $('avgfuel').textContent = summary.avg_fuel == null ? '--' : `${summary.avg_fuel >= 0 ? '+' : ''}${summary.avg_fuel.toFixed(1)}`;
       document.querySelector('#toggle-rpm').closest('label').hidden = selectedVehicle !== 'A';
       document.querySelector('#toggle-fuel').closest('label').hidden = selectedVehicle !== 'A';
-      renderLaps(lapData.laps || []);
-      renderRows(data.rows, summary.first_ts);
+      renderLaps(currentLaps);
+      renderRows(currentRows, summary.first_ts);
       drawTrace();
       loadedSignature = `${selectedSession.id}:${selectedVehicle}:${selectedSession.samples}:${selectedSession.end_ts ?? 'live'}`;
       $('load-state').textContent = selectedSession.end_ts == null ? '● LIVE SESSION' : 'SESSION LOADED';
     }
 
-    function renderLaps(laps) {
+    function selectLap(lap) {
+      if (selectedLap && selectedLap.lap_number === lap.lap_number) {
+        resetLapFilter();
+        return;
+      }
+      selectedLap = lap;
+      renderLaps(currentLaps);
+      applyLapFilter();
+    }
+
+    function resetLapFilter() {
+      selectedLap = null;
+      currentRows = allSessionRows.slice();
+      runFirstTs = allSessionSummary ? allSessionSummary.first_ts : null;
+      resetZoom();
+      $('track-link').href = `/map?session=${selectedSession.id}&vehicle_id=${selectedVehicle}`;
+      $('track-link').textContent = 'TRACK MAP ↗';
       $('lap-title').textContent = `VEHICLE ${selectedVehicle} LAP RECORD`;
+      renderLaps(currentLaps);
+      renderRows(currentRows, runFirstTs);
+      drawTrace();
+    }
+
+    function applyLapFilter() {
+      if (!selectedLap) return;
+      $('lap-title').innerHTML = `VEHICLE ${selectedVehicle} · LAP ${selectedLap.lap_number} (${lapTimeText(selectedLap.lap_time_s)}) <button class="lap-reset-btn" onclick="resetLapFilter()">전체 ↺</button>`;
+      $('track-link').href = `/map?session=${selectedSession.id}&vehicle_id=${selectedVehicle}&lap_number=${selectedLap.lap_number}`;
+      $('track-link').textContent = `LAP ${selectedLap.lap_number} 주행라인 ↗`;
+      
+      if (allSessionRows.length && selectedLap.start_ts && selectedLap.end_ts) {
+        const lapRows = allSessionRows.filter(r => r.ts >= selectedLap.start_ts - 0.5 && r.ts <= selectedLap.end_ts + 0.5);
+        if (lapRows.length >= 2) {
+          currentRows = lapRows;
+          runFirstTs = selectedLap.start_ts;
+          resetZoom();
+          renderRows(currentRows, runFirstTs);
+          drawTrace();
+        }
+      }
+    }
+
+    function renderLaps(laps) {
+      $('lap-title').textContent = selectedLap 
+        ? `VEHICLE ${selectedVehicle} · LAP ${selectedLap.lap_number} (${lapTimeText(selectedLap.lap_time_s)})`
+        : `VEHICLE ${selectedVehicle} LAP RECORD`;
       const validLaps = laps.filter(lap => lap.lap_number > 0);
       $('lap-count').textContent = `${validLaps.length} LAPS`;
       const body = $('laps');
@@ -284,19 +342,25 @@
 
       laps.forEach(lap => {
         const row = document.createElement('tr');
+        const isSelected = selectedLap && selectedLap.lap_number === lap.lap_number;
         const isBest = bestTime !== null && lap.lap_time_s != null && Math.abs(lap.lap_time_s - bestTime) < 0.001;
         const bestBadge = isBest ? ' <span style="color:#25e58d;background:#092113;padding:1px 4px;border:1px solid #1a5631;border-radius:2px;font-size:9px;font-weight:700;">★ BEST</span>' : '';
         const label = lap.lap_number === 0 ? 'BEFORE START' : `LAP ${lap.lap_number}`;
         const lapTimeFormatted = lapTimeText(lap.lap_time_s) + bestBadge;
         const distStr = lap.distance_m ? numberText(lap.distance_m / 1000, 2, ' km') : '--';
-        const mapLink = lap.points > 0
+        const mapLink = (lap.points > 0 || (selectedSession && selectedSession.id <= 2))
           ? `<a class="lap-track" target="_blank" rel="noopener" href="/map?session=${selectedId}&vehicle_id=${selectedVehicle}&lap_number=${lap.lap_number}">MAP ↗</a>`
           : '<span class="muted">--</span>';
         
+        row.className = 'clickable' + (isSelected ? ' active' : '');
         row.innerHTML = `<td class="lap-number">${label}</td><td>${lapTimeFormatted}</td><td>${distStr}</td><td>${numberText(lap.max_speed_kmh, 1, ' km/h')}</td><td>${numberText(lap.avg_speed_kmh, 1, ' km/h')}</td><td>${lap.points || '--'}</td><td>${mapLink}</td>`;
-        if (isBest) {
+        if (isBest && !isSelected) {
           row.style.background = '#061a0f';
         }
+        row.onclick = (e) => {
+          if (e.target.tagName.toLowerCase() === 'a') return;
+          selectLap(lap);
+        };
         body.append(row);
       });
     }

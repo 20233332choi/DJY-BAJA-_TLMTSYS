@@ -212,13 +212,14 @@
     }
 
     function renderHistorical(data) {
+      if (data.gate) updateGate(data.gate);
       const allLaps = new Set();
       for (const id of ['A','B']) {
         const rows = data.tracks?.[id] || [];
         rows.forEach(row => allLaps.add(Number(row.lap_number)));
         const points = rows
-          .filter(row => Number(row.accepted) && row.filtered_lat != null && row.filtered_lon != null)
-          .map(row => [Number(row.filtered_lat), Number(row.filtered_lon)]);
+          .filter(row => (row.filtered_lat != null || row.lat != null))
+          .map(row => [Number(row.filtered_lat != null ? row.filtered_lat : row.lat), Number(row.filtered_lon != null ? row.filtered_lon : row.lon)]);
         trails[id].length = 0;
         trails[id].push(...points);
         layers[id].trail.setLatLngs(points);
@@ -245,11 +246,15 @@
         select.value = historyLap;
       }
       const points = ['A','B'].flatMap(id => trails[id]);
-      if (points.length) map.fitBounds(L.latLngBounds(points), {padding:[45,45]});
+      if (points.length) {
+        map.fitBounds(L.latLngBounds(points), {padding:[45,45]});
+      } else if (data.gate) {
+        map.setView([data.gate.lat, data.gate.lon], 18);
+      }
       const sessionName = data.session?.name || `SESSION ${historySessionId}`;
       document.querySelector('.brand strong').textContent = `DJY TRACK · ${sessionName}`;
       document.querySelector('.brand span').textContent = historyLap ? `HISTORICAL · LAP ${historyLap}` : 'HISTORICAL GPS TRACK';
-      document.getElementById('status').textContent = `SESSION ${historySessionId} · ${points.length} TRACK POINTS`;
+      document.getElementById('status').textContent = `SESSION ${historySessionId} · ${points.length ? points.length + ' TRACK POINTS' : 'START GATE POSITION'}`;
       historicalLoaded = true;
     }
 
