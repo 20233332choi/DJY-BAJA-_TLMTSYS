@@ -1949,7 +1949,12 @@ def sessions_payload(db: Database) -> dict[str, Any]:
             COUNT(samples.id) AS samples,
             MAX(samples.rpm) AS max_rpm,
             MAX(samples.speed_kmh) AS max_speed,
-            MAX(samples.throttle_percent) AS max_throttle
+            MAX(samples.throttle_percent) AS max_throttle,
+            (
+                SELECT COUNT(*) FROM lap_records
+                WHERE (sessions.start_ts IS NULL OR lap_records.start_ts >= sessions.start_ts - 30)
+                  AND (sessions.end_ts IS NULL OR lap_records.end_ts <= sessions.end_ts + 30)
+            ) AS laps_count
         FROM sessions
         LEFT JOIN samples ON samples.session_id = sessions.id
         GROUP BY sessions.id
@@ -1980,6 +1985,9 @@ def track_payload(
     session = con.execute(
         "SELECT id, name, start_ts, end_ts FROM sessions WHERE id = ?", (session_id,)
     ).fetchone()
+    gate_row = con.execute(
+        "SELECT lat, lon, heading, half_width_m, min_lap_s FROM lap_gate WHERE id = 1"
+    ).fetchone()
     rows = con.execute(
         f"""
         SELECT vehicle_id, run_id, lap_number, ts, received_ts,
@@ -1996,13 +2004,20 @@ def track_payload(
     tracks = {"A": [], "B": []}
     for row in rows:
         tracks[row["vehicle_id"]].append(dict(row))
-    return {"session": dict(session) if session else None, "tracks": tracks}
+    return {
+        "session": dict(session) if session else None,
+        "gate": dict(gate_row) if gate_row else None,
+        "tracks": tracks,
+    }
 
 
 def laps_payload(db: Database, session_id: int, vehicle_id: str) -> dict[str, Any]:
     vehicle_id = validate_lap_vehicle_id(vehicle_id)
     con = db.connect()
     con.row_factory = sqlite3.Row
+    session = con.execute(
+        "SELECT id, name, start_ts, end_ts FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
     points = con.execute(
         """
         SELECT run_id, lap_number, ts, lat, lon, speed_kmh,
@@ -2022,9 +2037,6 @@ def laps_payload(db: Database, session_id: int, vehicle_id: str) -> dict[str, An
         """,
         (vehicle_id,),
     ).fetchall()
-    session = con.execute(
-        "SELECT id, name, start_ts, end_ts FROM sessions WHERE id = ?", (session_id,)
-    ).fetchone()
     con.close()
 
     recorded = {(row["run_id"], row["lap_number"]): dict(row) for row in lap_records}
@@ -2067,18 +2079,44 @@ def laps_payload(db: Database, session_id: int, vehicle_id: str) -> dict[str, An
         previous_by_lap[lap_number] = current
 
     result = []
-    for lap_number in sorted(grouped):
-        lap = grouped[lap_number]
-        lap["avg_speed_kmh"] = (
-            lap["_speed_sum"] / lap["_speed_count"] if lap["_speed_count"] else None
-        )
-        record = recorded.get((lap["run_id"], lap_number))
-        lap["lap_time_s"] = record["lap_time_s"] if record else None
-        lap["start_ts"] = record["start_ts"] if record else lap["first_ts"]
-        lap["end_ts"] = record["end_ts"] if record else lap["last_ts"]
-        lap.pop("_speed_sum")
-        lap.pop("_speed_count")
-        result.append(lap)
+    if grouped:
+        for lap_number in sorted(grouped):
+            lap = grouped[lap_number]
+            lap["avg_speed_kmh"] = (
+                lap["_speed_sum"] / lap["_speed_count"] if lap["_speed_count"] else None
+            )
+            record = recorded.get((lap["run_id"], lap_number))
+            lap["lap_time_s"] = record["lap_time_s"] if record else None
+            lap["start_ts"] = record["start_ts"] if record else lap["first_ts"]
+            lap["end_ts"] = record["end_ts"] if record else lap["last_ts"]
+            lap.pop("_speed_sum")
+            lap.pop("_speed_count")
+            result.append(lap)
+    else:
+        # Fallback to lap_records matching this session
+        if session and session["start_ts"] is not None and session["end_ts"] is not None:
+            matched_records = [
+                dict(row) for row in lap_records
+                if (row["start_ts"] >= session["start_ts"] - 30 and row["end_ts"] <= session["end_ts"] + 30)
+            ]
+        else:
+            matched_records = [dict(row) for row in lap_records]
+
+        for row in matched_records:
+            result.append({
+                "lap_number": row["lap_number"],
+                "run_id": row["run_id"],
+                "lap_time_s": row["lap_time_s"],
+                "start_ts": row["start_ts"],
+                "end_ts": row["end_ts"],
+                "first_ts": row["start_ts"],
+                "last_ts": row["end_ts"],
+                "points": 0,
+                "distance_m": 0.0,
+                "max_speed_kmh": None,
+                "avg_speed_kmh": None,
+            })
+
     return {
         "session": dict(session) if session else None,
         "vehicle_id": vehicle_id,

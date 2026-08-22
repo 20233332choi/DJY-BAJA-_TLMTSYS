@@ -188,7 +188,15 @@
         time.textContent = dateText(session.start_ts);
         const count = document.createElement('span');
         count.className = session.end_ts == null ? 'live' : '';
-        count.textContent = session.end_ts == null ? '● REC' : `${session.samples} pts`;
+        if (session.end_ts == null) {
+          count.textContent = '● REC';
+        } else if (session.samples > 0) {
+          count.textContent = `${Number(session.samples).toLocaleString()} pts`;
+        } else if (session.laps_count > 0) {
+          count.textContent = `${session.laps_count} laps`;
+        } else {
+          count.textContent = '0 pts';
+        }
         meta.append(time, count);
         button.append(name, meta);
         button.onclick = () => selectSession(session.id);
@@ -239,7 +247,10 @@
       $('detail-heading').textContent = `GPS ${selectedVehicle} / IMU / ECU`;
       $('track-link').href = `/map?session=${selectedSession.id}&vehicle_id=${selectedVehicle}`;
       $('track-link').hidden = false;
-      $('samples').textContent = summary.samples;
+      
+      const lapCount = lapData.laps ? lapData.laps.filter(l => l.lap_number > 0).length : 0;
+      $('samples').textContent = summary.samples ? Number(summary.samples).toLocaleString() : (lapCount ? `${lapCount} Laps` : '0');
+      
       const duration = durationParts(selectedSession.start_ts, selectedSession.end_ts);
       $('duration').innerHTML = `${duration.value}<span class="metric-unit">${duration.unit}</span>`;
       $('maxrpm').textContent = summary.max_rpm ?? '--';
@@ -256,7 +267,8 @@
 
     function renderLaps(laps) {
       $('lap-title').textContent = `VEHICLE ${selectedVehicle} LAP RECORD`;
-      $('lap-count').textContent = `${laps.filter(lap => lap.lap_number > 0).length} LAPS`;
+      const validLaps = laps.filter(lap => lap.lap_number > 0);
+      $('lap-count').textContent = `${validLaps.length} LAPS`;
       const body = $('laps');
       body.replaceChildren();
       if (!laps.length) {
@@ -265,10 +277,26 @@
         body.append(row);
         return;
       }
+      
+      // Calculate best lap time
+      const timedLaps = validLaps.filter(l => l.lap_time_s != null && l.lap_time_s > 0);
+      const bestTime = timedLaps.length ? Math.min(...timedLaps.map(l => l.lap_time_s)) : null;
+
       laps.forEach(lap => {
         const row = document.createElement('tr');
+        const isBest = bestTime !== null && lap.lap_time_s != null && Math.abs(lap.lap_time_s - bestTime) < 0.001;
+        const bestBadge = isBest ? ' <span style="color:#25e58d;background:#092113;padding:1px 4px;border:1px solid #1a5631;border-radius:2px;font-size:9px;font-weight:700;">★ BEST</span>' : '';
         const label = lap.lap_number === 0 ? 'BEFORE START' : `LAP ${lap.lap_number}`;
-        row.innerHTML = `<td class="lap-number">${label}</td><td>${lapTimeText(lap.lap_time_s)}</td><td>${numberText(lap.distance_m / 1000, 2, ' km')}</td><td>${numberText(lap.max_speed_kmh, 1, ' km/h')}</td><td>${numberText(lap.avg_speed_kmh, 1, ' km/h')}</td><td>${lap.points}</td><td><a class="lap-track" target="_blank" rel="noopener" href="/map?session=${selectedId}&vehicle_id=${selectedVehicle}&lap_number=${lap.lap_number}">MAP ↗</a></td>`;
+        const lapTimeFormatted = lapTimeText(lap.lap_time_s) + bestBadge;
+        const distStr = lap.distance_m ? numberText(lap.distance_m / 1000, 2, ' km') : '--';
+        const mapLink = lap.points > 0
+          ? `<a class="lap-track" target="_blank" rel="noopener" href="/map?session=${selectedId}&vehicle_id=${selectedVehicle}&lap_number=${lap.lap_number}">MAP ↗</a>`
+          : '<span class="muted">--</span>';
+        
+        row.innerHTML = `<td class="lap-number">${label}</td><td>${lapTimeFormatted}</td><td>${distStr}</td><td>${numberText(lap.max_speed_kmh, 1, ' km/h')}</td><td>${numberText(lap.avg_speed_kmh, 1, ' km/h')}</td><td>${lap.points || '--'}</td><td>${mapLink}</td>`;
+        if (isBest) {
+          row.style.background = '#061a0f';
+        }
         body.append(row);
       });
     }
@@ -287,10 +315,10 @@
       rows.forEach(row => {
         const values = [
           `+${(row.ts - firstTs).toFixed(1)}s`,
-          selectedVehicle === 'A' ? row.rpm : '--',
+          selectedVehicle === 'A' ? (row.rpm ?? '--') : '--',
           row.vehicle_speed_kmh == null ? '--' : row.vehicle_speed_kmh.toFixed(1),
-          selectedVehicle === 'A' ? row.throttle_percent : '--',
-          selectedVehicle === 'A' ? `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}` : '--',
+          selectedVehicle === 'A' ? (row.throttle_percent ?? '--') : '--',
+          selectedVehicle === 'A' ? (row.fuel_add == null ? '--' : `${row.fuel_add >= 0 ? '+' : ''}${row.fuel_add}`) : '--',
           row.vehicle_gps_age == null ? '--' : `${row.vehicle_gps_age.toFixed(1)}s`
         ];
         const tr = document.createElement('tr');
@@ -412,7 +440,11 @@
         ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
       }
       if (currentRows.length < 2) {
-        ctx.fillText('WAITING FOR RUN DATA', pad.l, pad.t + 20);
+        ctx.fillStyle = '#555';
+        ctx.font = '11px Consolas, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('랩타이밍 전용 세션입니다 (상단 랩 기록 테이블에서 랩타임 확인)', w / 2, h / 2);
+        ctx.textAlign = 'left';
         return;
       }
       const range = visibleRange();
